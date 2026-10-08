@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "typeRoots": ["../demo-web/node_modules/@types", "../../node_modules/@types"],
+    "paths": {
+      "@sentriq/core": ["../../packages/core/dist/index.d.ts"],
+      "@sentriq/browser": ["../../packages/browser/dist/index.d.ts"],
+      "@electric-sql/pglite": ["../security-api/node_modules/@electric-sql/pglite/dist/index.d.ts"],
+      "next": ["../demo-web/node_modules/next"],
+      "next/*": ["../demo-web/node_modules/next/*"]
+    }
+  }
+}

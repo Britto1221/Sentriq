@@ -1,0 +1,29 @@
+{
+  "name": "@sentriq/access",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts"
+    },
+    "./tokens.css": "./src/tokens.css",
+    "./components.css": "./src/components.css"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "i18next": "^26.4.2",
+    "react-i18next": "^17.0.16"
+  },
+  "devDependencies": {
+    "@types/react": "19.3.0"
+  },
+  "peerDependencies": {
+    "react": ">=19.0.0",
+    "react-dom": ">=19.0.0"
+  }
+}

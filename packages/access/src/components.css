@@ -1,0 +1,37 @@
+.access-preferences { display: grid; gap: var(--access-space-5); }
+.access-preferences__header { display: flex; justify-content: space-between; gap: var(--access-space-4); }
+.access-preferences__eyebrow { margin-bottom: var(--access-space-1); color: var(--access-theme-signal, var(--access-signal)); font-size: var(--access-type-xs); font-weight: 750; text-transform: uppercase; letter-spacing: 0.06em; }
+.access-preferences__header h2 { margin: 0; font-size: var(--access-type-xl); }
+.access-preferences__header p:not(.access-preferences__eyebrow) { max-width: 62ch; margin: var(--access-space-2) 0 0; color: var(--access-theme-muted, var(--access-muted)); }
+.access-preferences__grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--access-space-4); }
+.access-field { display: grid; min-width: 0; gap: var(--access-space-2); }
+.access-field label { font-size: var(--access-type-sm); font-weight: 720; }
+.access-field p { margin: 0; color: var(--access-theme-muted, var(--access-muted)); font-size: var(--access-type-xs); }
+.access-field select, .access-field input[type="range"] { width: 100%; min-height: 44px; }
+.access-field select { padding: var(--access-space-2) var(--access-space-3); border: var(--access-border-width) solid var(--access-outline); border-radius: var(--access-radius-sm); background: var(--access-theme-surface, var(--access-surface)); color: var(--access-theme-ink, var(--access-ink)); }
+.access-field input[type="range"] { accent-color: var(--access-theme-signal, var(--access-signal)); }
+.access-field output { font-variant-numeric: tabular-nums; }
+.access-preferences__switches { display: grid; }
+.access-toggle { display: flex; align-items: center; justify-content: space-between; gap: var(--access-space-4); padding: var(--access-space-3) 0; border-bottom: var(--access-border-width) solid var(--access-outline); }
+.access-toggle:last-child { border-bottom: 0; }
+.access-toggle label { font-size: var(--access-type-sm); font-weight: 720; }
+.access-toggle p { margin: var(--access-space-1) 0 0; color: var(--access-theme-muted, var(--access-muted)); font-size: var(--access-type-xs); }
+.access-toggle input { flex: 0 0 auto; width: 22px; height: 22px; accent-color: var(--access-theme-signal, var(--access-signal)); }
+.access-keyboard-guide, .access-voice-tools, .access-privacy-note { padding: var(--access-space-4); border: var(--access-border-width) solid var(--access-outline); border-radius: var(--access-radius-sm); background: var(--access-theme-raised, var(--access-raised)); color: var(--access-theme-ink, var(--access-ink)); box-shadow: var(--access-shadow-small); }
+.access-keyboard-guide h3, .access-voice-tools h3, .access-privacy-note h3 { margin: 0 0 var(--access-space-2); font-size: var(--access-type-lg); }
+.access-keyboard-guide ul { display: grid; gap: var(--access-space-2); margin: 0; padding-left: 1.25rem; }
+.access-voice-tools > p, .access-privacy-note p { margin: 0 0 var(--access-space-2); color: var(--access-theme-muted, var(--access-muted)); font-size: var(--access-type-sm); }
+.access-privacy-note p:last-child { margin-bottom: 0; }
+.access-voice-tools__controls { display: grid; grid-template-columns: minmax(180px, 0.8fr) minmax(260px, 1.2fr); align-items: end; gap: var(--access-space-4); }
+.access-voice-tools__buttons { display: flex; flex-wrap: wrap; gap: var(--access-space-2); }
+.access-button { min-height: 44px; padding: var(--access-space-2) var(--access-space-3); border: var(--access-border-width) solid var(--access-outline); border-radius: var(--access-radius-sm); background: var(--access-theme-surface, var(--access-surface)); color: var(--access-theme-ink, var(--access-ink)); font: inherit; font-size: var(--access-type-sm); font-weight: 740; box-shadow: var(--access-shadow-small); cursor: pointer; transition: transform var(--access-motion-fast) ease, box-shadow var(--access-motion-fast) ease; }
+.access-button:hover:not(:disabled) { transform: translate(-1px, -1px); box-shadow: 4px 4px 0 var(--access-outline); }
+.access-button:active:not(:disabled) { transform: translate(2px, 2px); box-shadow: 1px 1px 0 var(--access-outline); }
+.access-button--primary { background: var(--access-theme-signal, var(--access-signal)); }
+.access-button:disabled { opacity: 0.55; cursor: not-allowed; }
+.access-voice-tools__status { min-height: 1.5em; margin: var(--access-space-3) 0 0 !important; font-size: var(--access-type-xs) !important; }
+
+@media (max-width: 700px) {
+  .access-preferences__grid, .access-voice-tools__controls { grid-template-columns: 1fr; }
+  .access-voice-tools__buttons { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

@@ -1,0 +1,144 @@
+:root {
+  /* Shared, framework-neutral design tokens. Breakpoints are also exported from DESIGN_TOKENS. */
+  --design-space-0: 0;
+  --design-space-1: 0.25rem;
+  --design-space-2: 0.5rem;
+  --design-space-3: 0.75rem;
+  --design-space-4: 1rem;
+  --design-space-5: 1.5rem;
+  --design-space-6: 2rem;
+  --design-space-7: 3rem;
+  --design-font-body: "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  --design-font-mono: "Cascadia Code", Consolas, "Liberation Mono", monospace;
+  --design-type-xs: 0.75rem;
+  --design-type-sm: 0.875rem;
+  --design-type-base: 1rem;
+  --design-type-lg: 1.25rem;
+  --design-type-xl: 1.75rem;
+  --design-type-display: clamp(2rem, 4vw, 3rem);
+  --design-weight-regular: 400;
+  --design-weight-medium: 560;
+  --design-weight-semibold: 650;
+  --design-weight-bold: 740;
+  --design-line-tight: 1.16;
+  --design-line-body: 1.55;
+  --design-line-relaxed: 1.75;
+  --design-letter-tight: -0.025em;
+  --design-letter-normal: 0;
+  --design-letter-wide: 0.035em;
+  --design-border-width: 2px;
+  --design-border-style: solid;
+  --design-radius-none: 0;
+  --design-radius-xs: 0;
+  --design-radius-sm: 2px;
+  --design-radius-md: 4px;
+  --design-shadow-small: 3px 3px 0 var(--access-outline, #050705);
+  --design-shadow-hard: 4px 4px 0 var(--access-outline, #050705);
+  --design-motion-fast: 120ms;
+  --design-motion-normal: 180ms;
+  --design-motion-easing: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --design-focus-width: 3px;
+  --design-focus-offset: 3px;
+  --design-breakpoint-mobile: 620px;
+  --design-breakpoint-tablet: 780px;
+  --design-breakpoint-compact-desktop: 1050px;
+  --design-breakpoint-wide: 1280px;
+
+  /* Semantic fallbacks keep the shared controls readable before an app theme is selected. */
+  --access-canvas: #171b16;
+  --access-shell: #20261f;
+  --access-surface: #f0f1e6;
+  --access-raised: #dce5d0;
+  --access-ink: #151912;
+  --access-muted: #3e493a;
+  --access-outline: #050705;
+  --access-signal: #ccff52;
+  --access-success: #247343;
+  --access-warning: #755700;
+  --access-danger: #a5313c;
+  --access-shell-text: #f1f4e9;
+  --access-shell-muted: #bdc7b4;
+  --access-focus: #ccff52;
+
+  --access-space-1: var(--design-space-1);
+  --access-space-2: var(--design-space-2);
+  --access-space-3: var(--design-space-3);
+  --access-space-4: var(--design-space-4);
+  --access-space-5: var(--design-space-5);
+  --access-space-6: var(--design-space-6);
+  --access-type-xs: var(--design-type-xs);
+  --access-type-sm: var(--design-type-sm);
+  --access-type-base: var(--design-type-base);
+  --access-type-lg: var(--design-type-lg);
+  --access-type-xl: var(--design-type-xl);
+  --access-border-width: var(--design-border-width);
+  --access-radius-xs: var(--design-radius-xs);
+  --access-radius-sm: var(--design-radius-sm);
+  --access-radius-md: var(--design-radius-md);
+  --access-shadow-hard: var(--design-shadow-hard);
+  --access-shadow-small: var(--design-shadow-small);
+  --access-motion-fast: var(--design-motion-fast);
+  --access-motion-normal: var(--design-motion-normal);
+  --access-focus-width: var(--design-focus-width);
+  --access-focus-offset: var(--design-focus-offset);
+}
+
+[data-access-theme="sentriq"] {
+  --access-canvas: #171b16;
+  --access-shell: #20261f;
+  --access-surface: #f0f1e6;
+  --access-raised: #dce5d0;
+  --access-ink: #151912;
+  --access-muted: #3e493a;
+  --access-outline: #050705;
+  --access-signal: #ccff52;
+  --access-success: #247343;
+  --access-warning: #755700;
+  --access-danger: #a5313c;
+  --access-shell-text: #f1f4e9;
+  --access-shell-muted: #bdc7b4;
+  --access-focus: #ccff52;
+}
+
+[data-access-theme="northstar"] {
+  --access-canvas: #f3f6f8;
+  --access-shell: #ffffff;
+  --access-surface: #ffffff;
+  --access-raised: #eef4f7;
+  --access-ink: #142531;
+  --access-muted: #526673;
+  --access-outline: #dce5ea;
+  --access-signal: #2d6488;
+  --access-success: #1f5c50;
+  --access-warning: #755700;
+  --access-danger: #b83232;
+  --access-shell-text: #142531;
+  --access-shell-muted: #526673;
+  --access-focus: #075b83;
+}
+
+html[data-access-high-contrast="true"] {
+  --access-surface: #fff;
+  --access-raised: #fff;
+  --access-ink: #000;
+  --access-muted: #202020;
+  --access-outline: #000;
+  --access-shell-text: #fff;
+  --access-shell-muted: #fff;
+}
+
+html[data-access-larger-text="true"] { font-size: 112.5%; }
+html[data-access-reduced-motion="true"] { scroll-behavior: auto !important; }
+
+@media (prefers-reduced-motion: reduce) {
+  :root { --design-motion-fast: 0ms; --design-motion-normal: 0ms; --access-motion-fast: 0ms; --access-motion-normal: 0ms; }
+}
+
+html[data-access-reduced-motion="true"] *,
+html[data-access-reduced-motion="true"] *::before,
+html[data-access-reduced-motion="true"] *::after {
+  scroll-behavior: auto !important;
+  transition-duration: 0.01ms !important;
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+}

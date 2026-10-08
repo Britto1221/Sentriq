@@ -1,0 +1,23 @@
+{
+  "name": "@sentriq/core",
+  "version": "0.1.0",
+  "description": "Framework-independent, host-storage-backed WebAuthn authentication primitives for Sentriq.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "sideEffects": false,
+  "files": ["dist", "README.md"],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run src/passkey-server.test.ts"
+  },
+  "dependencies": {
+    "@simplewebauthn/server": "14.0.3"
+  }
+}

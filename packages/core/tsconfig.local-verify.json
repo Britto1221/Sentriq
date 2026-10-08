@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "baseUrl": "../..",
+    "paths": {
+      "@simplewebauthn/server": ["apps/security-api/node_modules/@simplewebauthn/server/esm/index.d.ts"]
+    }
+  }
+}

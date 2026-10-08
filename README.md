@@ -86,4 +86,3 @@ Use `@sentriq/sdk` only from trusted server routes. Keep the application key ser
 The repository includes Apache-2.0 licensing and third-party notices. Workspace packages are not published to npm. Review dependency licenses when creating a release artifact. No production deployment, formal cryptographic review, native-speaker translation review, or real-device authenticator matrix is claimed.
 
 See [SECURITY.md](SECURITY.md) for vulnerability reporting and [CONTRIBUTING.md](CONTRIBUTING.md) for development conventions.
-

@@ -1,0 +1,22 @@
+{
+  "name": "@sentriq/browser",
+  "version": "0.1.0",
+  "description": "Browser WebAuthn helpers for Sentriq integrations.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "sideEffects": false,
+  "files": ["dist", "README.md"],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@simplewebauthn/browser": "14.0.0"
+  }
+}

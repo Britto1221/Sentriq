@@ -1,0 +1,26 @@
+{
+  "name": "sentriq-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@12.10.1",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "dev": "concurrently -k -n api,northstar -c cyan,green \"pnpm dev:api\" \"pnpm dev:northstar\"",
+    "dev:northstar": "pnpm --filter @sentriq/demo-web dev",
+    "dev:api": "pnpm --filter @sentriq/security-api dev",
+    "build": "pnpm -r --if-present build",
+    "test:e2e": "playwright test"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@axe-core/playwright": "4.13.0",
+    "@playwright/test": "1.64.0",
+    "typescript": "5.9.3",
+    "vitest": "5.0.3",
+    "concurrently": "9.2.1"
+  }
+}

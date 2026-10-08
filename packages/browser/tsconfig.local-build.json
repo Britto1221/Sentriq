@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.build.json",
+  "compilerOptions": {
+    "baseUrl": "../..",
+    "paths": {
+      "@simplewebauthn/browser": ["apps/demo-web/node_modules/@simplewebauthn/browser/esm/index.d.ts"]
+    }
+  }
+}

@@ -1,0 +1,16 @@
+node_modules/
+.next/
+dist/
+coverage/
+.vitest/
+.artifacts/
+.data/
+playwright-report/
+test-results/
+.env
+.env.*
+.env.local
+!.env.example
+*.pem
+*.key
+*.tsbuildinfo

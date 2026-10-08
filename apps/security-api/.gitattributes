@@ -1,0 +1,2 @@
+# Migration checksums must be identical after Windows and Unix checkouts.
+migrations/*.sql text eol=lf

@@ -1,0 +1,20 @@
+{
+  "name": "@sentriq/sdk",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@sentriq/shared": "workspace:*",
+    "zod": "4.6.5"
+  }
+}
