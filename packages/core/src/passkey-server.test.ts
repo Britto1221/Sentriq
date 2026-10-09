@@ -77,7 +77,7 @@ describe("host-storage Sentriq passkey server", () => {
   it("does not let an account identifier alone authorize passkey enrollment", async () => {
     const { server, storage } = fixture();
 
-    await expect(server.registrationOptions({ account, origin: "http://localhost:4101" })).rejects.toMatchObject({ code: "AUTHENTICATION_FAILED" });
+    await expect(server.registrationOptions({ account, origin: "http://localhost:4101" } as never)).rejects.toMatchObject({ code: "AUTHENTICATION_FAILED" });
     expect(storage.challenges.size).toBe(0);
   });
 
@@ -100,7 +100,7 @@ describe("host-storage Sentriq passkey server", () => {
   it("treats email as optional profile data rather than enrollment authorization", async () => {
     const { server, storage } = fixture();
     const accountWithOptionalEmail = { ...account, email: "profile@example.test" };
-    await expect(server.registrationOptions({ account: accountWithOptionalEmail, origin: "http://localhost:4101" })).rejects.toMatchObject({ code: "AUTHENTICATION_FAILED" });
+    await expect(server.registrationOptions({ account: accountWithOptionalEmail, origin: "http://localhost:4101" } as never)).rejects.toMatchObject({ code: "AUTHENTICATION_FAILED" });
     const authorized = await beginRegistration(server, storage, accountWithOptionalEmail);
     expect(authorized.options.user.name).toBe(accountWithOptionalEmail.id);
   });

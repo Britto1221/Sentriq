@@ -4,7 +4,7 @@ Device Link is an application workflow that lets a user approve adding a new pas
 
 ## Request and approval
 
-1. The new browser submits an email address. The API returns a random request ID, a cryptographically random 6-character comparison code, and a 10-minute transaction token. Northstar's same-origin BFF stores the transaction token in a short-lived HttpOnly, `SameSite=Strict` cookie; JavaScript receives only the request ID, comparison code and expiry.
+1. The new browser submits the host-owned account ID. The API returns a random request ID, a cryptographically random 6-character comparison code, and a 10-minute transaction token. Northstar's same-origin BFF stores the transaction token in a short-lived HttpOnly, `SameSite=Strict` cookie; JavaScript receives only the request ID, comparison code and expiry.
 2. The new browser displays the code and polls status while retaining its cookie. The API persists a digest of the transaction token and the account binding. Knowing the email or request ID is not authentication.
 3. An authenticated existing device reads a user-scoped approval inbox. The user compares the code shown on both devices and explicitly confirms the match.
 4. The existing device requests approval options and completes a fresh passkey assertion. The API binds that challenge to the exact user, session and request, verifies WebAuthn, and atomically changes the request from `PENDING` to `APPROVED`.

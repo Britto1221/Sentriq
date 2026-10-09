@@ -27,7 +27,7 @@ export function rejected(status: number, code: string, message: string): Respons
 function isUser(value: unknown, applicationId: string): value is AuthenticatedUser {
   if (!value || typeof value !== "object") return false;
   const user = value as Partial<AuthenticatedUser>;
-  return typeof user.id === "string" && typeof user.email === "string" && typeof user.displayName === "string"
+  return typeof user.id === "string" && (user.email === undefined || user.email === null || typeof user.email === "string") && typeof user.displayName === "string"
     && (user.role === "user" || user.role === "developer" || user.role === "admin")
     && user.applicationId === applicationId && typeof user.passkeyEnrollmentRequired === "boolean";
 }

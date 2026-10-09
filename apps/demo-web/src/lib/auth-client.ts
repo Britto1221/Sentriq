@@ -2,7 +2,7 @@ import type { PasskeySummary, ReclaimRegistrationOptionsResult, ReclaimRegistrat
 
 export interface AuthenticatedUser {
   id: string;
-  email: string;
+  email?: string | null;
   displayName: string;
   role: "user" | "developer" | "admin";
   applicationId: string;
@@ -62,14 +62,8 @@ function authRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
 }
 
 export const northstarAuth = {
-  registrationStart(input: { email: string }) {
-    return authRequest<{ status: "accepted" }>("registration/start", { method: "POST", body: JSON.stringify(input) });
-  },
-  developmentEmailInbox(input: { email: string }) {
-    return authRequest<{ verificationCode: string; expiresAt: string }>("dev/email-inbox", { method: "POST", body: JSON.stringify(input) });
-  },
-  verifyRegistrationEmail(input: { email: string; code: string }) {
-    return authRequest<{ status: "verified"; expiresIn: number }>("registration/verify", { method: "POST", body: JSON.stringify(input) });
+  registrationStart(input: { displayName: string; email?: string }) {
+    return authRequest<{ status: "accepted"; accountId: string }>("registration/start", { method: "POST", body: JSON.stringify(input) });
   },
   session() {
     return authRequest<AuthSession>("session", { method: "GET" });
@@ -89,8 +83,8 @@ export const northstarAuth = {
   logout() {
     return authRequest<{ status: "ok" }>("logout", { method: "POST", body: "{}" });
   },
-  authenticationOptions(email?: string) {
-    return authRequest<{ challengeId: string; options: unknown }>("webauthn/login/options", { method: "POST", body: JSON.stringify(email ? { email } : {}) });
+  authenticationOptions(accountId?: string) {
+    return authRequest<{ challengeId: string; options: unknown }>("webauthn/login/options", { method: "POST", body: JSON.stringify(accountId ? { accountId } : {}) });
   },
   async authenticationVerify(input: { challengeId: string; response: unknown }) {
     return authRequest<{ user: AuthenticatedUser }>("webauthn/login/verify", { method: "POST", body: JSON.stringify(input) });
@@ -101,10 +95,10 @@ export const northstarAuth = {
   registrationVerify(input: { challengeId: string; response: unknown }) {
     return authRequest<{ verified: true; user: AuthenticatedUser; recoveryCodes: string[] }>("webauthn/register/verify", { method: "POST", body: JSON.stringify(input) });
   },
-  reclaimStart(input: { email: string }) {
+  reclaimStart(input: { accountId: string }) {
     return authRequest<{ status: "accepted"; expiresIn: number }>("reclaim/start", { method: "POST", body: JSON.stringify(input) });
   },
-  reclaimVerify(input: { email: string; recoveryCode: string }) {
+  reclaimVerify(input: { accountId: string; recoveryCode: string }) {
     return authRequest<ReclaimVerifyResult>("reclaim/verify", { method: "POST", body: JSON.stringify(input) });
   },
   reclaimRegistrationOptions() {
@@ -116,7 +110,7 @@ export const northstarAuth = {
   reclaimCancel() {
     return authRequest<{ status: "cancelled" }>("reclaim/cancel", { method: "POST", body: "{}" });
   },
-  startDeviceLink(input: { email: string }) {
+  startDeviceLink(input: { accountId: string }) {
     return authRequest<{ status: "accepted"; requestId: string; comparisonCode: string; expiresIn: number }>("device-links/start", { method: "POST", body: JSON.stringify(input) });
   },
   deviceLinkStatus(requestId: string) {

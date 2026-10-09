@@ -38,9 +38,9 @@ The protected Northstar backend loads the authenticated session, asks the server
 
 Recovery code verification atomically consumes one one-way verifier and creates a ten-minute restricted transaction. That transaction can only issue and complete a replacement-passkey ceremony. Successful replacement revokes old credentials and sessions, invalidates old codes, stores the new verified public credential, and returns six new recovery codes once. It creates no authenticated session. Recovery codes do not satisfy Shield.
 
-### Recovery guide
+### Sentriq Assistant
 
-Northstar classifies a user's local text with deterministic English/Tamil rules. It stores only a fixed response key and route in component state; user text is not rendered into history, sent to a server, logged, or saved. The guide can link only to sign-in or the secure recovery form. It is labeled as rule-based guidance with no AI model connected.
+Northstar mounts Sentriq Assistant across account-entry and security pages. Its same-origin route accepts only a page category, English/Tamil locale, bounded chat text, and an offline-mode choice. It does not receive account IDs, session state, cookies, or auth headers. OpenAI calls are made by a server-only adapter; the deterministic localized guide remains available when credentials or model access are unavailable. The model has no tools and cannot trigger any security API operation. All outcomes remain under the existing deterministic server authorization paths.
 
 ## Storage and runtime
 

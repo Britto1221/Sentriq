@@ -7,7 +7,6 @@ import { startRegistration } from "@sentriq/browser";
 import { useAccessPreferences, useAccessVoice, useTranslation } from "@sentriq/access";
 import { AuthLanguageSelect } from "@/components/auth-language-select";
 import { Button, InlineStatus } from "@/components/primitives";
-import { RecoveryAssistant } from "@/components/recovery-assistant";
 import { northstarAuth, NorthstarAuthError } from "@/lib/auth-client";
 
 type RecoveryPhase = "identify" | "verify" | "enroll" | "complete";
@@ -17,7 +16,7 @@ export function RecoveryFlow() {
   const { preferences, ready, setPreference } = useAccessPreferences();
   const voice = useAccessVoice();
   const [phase, setPhase] = useState<RecoveryPhase>("identify");
-  const [email, setEmail] = useState("");
+  const [accountId, setAccountId] = useState("");
   const [recoveryCode, setRecoveryCode] = useState("");
   const [recoveryCodes, setRecoveryCodes] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
@@ -33,7 +32,7 @@ export function RecoveryFlow() {
   async function start(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setBusy(true); setStatus(null);
     try {
-      await northstarAuth.reclaimStart({ email: email.trim().toLowerCase() });
+      await northstarAuth.reclaimStart({ accountId: accountId.trim() });
       setPhase("verify");
       setStatus({ kind: "success", message: t("auth.live.recoveryRequestAccepted") });
     } catch (error) {
@@ -45,7 +44,7 @@ export function RecoveryFlow() {
     event.preventDefault();
     setBusy(true); setStatus(null);
     try {
-      await northstarAuth.reclaimVerify({ email: email.trim().toLowerCase(), recoveryCode });
+      await northstarAuth.reclaimVerify({ accountId: accountId.trim(), recoveryCode });
       setRecoveryCode("");
       setPhase("enroll");
       setStatus({ kind: "success", message: t("auth.live.recoveryReplacementIntro") });
@@ -116,9 +115,9 @@ export function RecoveryFlow() {
       </div>
 
       {phase === "identify" ? <form className="identity-form" onSubmit={(event) => void start(event)}>
-        <div className="form-field"><label htmlFor="recovery-email">{t("auth.live.emailLabel")}</label><input id="recovery-email" type="email" autoComplete="email" maxLength={254} required value={email} onChange={(event) => setEmail(event.target.value)} /></div>
+        <div className="form-field"><label htmlFor="recovery-account">{t("auth.live.accountIdentifierLabel")}</label><input id="recovery-account" autoComplete="username" maxLength={64} required value={accountId} onChange={(event) => setAccountId(event.target.value)} /></div>
         {status ? <InlineStatus kind={status.kind} role={status.kind === "error" ? "alert" : "status"}>{status.message}</InlineStatus> : null}
-        <Button type="submit" className="button-full" disabled={busy || !email.trim()}>{busy ? t("auth.live.working") : t("auth.live.beginRecovery")}</Button>
+        <Button type="submit" className="button-full" disabled={busy || !accountId.trim()}>{busy ? t("auth.live.working") : t("auth.live.beginRecovery")}</Button>
       </form> : null}
 
       {phase === "verify" ? <form className="identity-form" onSubmit={(event) => void verifyCode(event)}>
@@ -157,6 +156,5 @@ export function RecoveryFlow() {
 
       <p className="identity-switch"><Link href="/login">{t("auth.live.backToSignIn")}</Link></p>
     </section>
-    <RecoveryAssistant />
   </main>;
 }

@@ -32,13 +32,11 @@ describe("access language catalogs", () => {
     expect(isVoiceGuideId("developer input" as never)).toBe(false);
   });
 
-  it("keeps the real-auth copy complete and recovery codes distinct from email verification", () => {
+  it("keeps the real-auth copy complete without email delivery or verification", () => {
     for (const { code } of languageMetadata) {
       const auth = languageCatalogs[code].auth.live;
-      expect(auth.emailLabel).toBeTruthy();
       expect(auth).not.toHaveProperty("passwordLabel");
       expect(auth.displayNameLabel).toBeTruthy();
-      expect(auth.invalidEmail).toBeTruthy();
       expect(auth.requiredName).toBeTruthy();
       expect(auth.correctFields).toBeTruthy();
       expect(auth.loginTitle).toBeTruthy();
@@ -117,7 +115,7 @@ describe("access language catalogs", () => {
     expect(languageCatalogs.en.auth.live.recoveryRequestAccepted).toMatch(/if the details match/i);
     expect(languageCatalogs.en.auth.live.recoverySuccess).toMatch(/does not sign you in automatically/i);
     expect(languageCatalogs.ta.auth.live.recoverySuccess).toMatch(/தானாக உள்நுழையப்படமாட்டீர்கள்/);
-    expect(languageCatalogs.en.auth.live.recoveryGuideDisclosure).toMatch(/no AI model is connected/i);
+    expect(languageCatalogs.en.auth.live.recoveryGuideDisclosure).toMatch(/OpenAI when configured|offline guidance/i);
   });
 
   it("does not claim the draft translations had native review", () => {

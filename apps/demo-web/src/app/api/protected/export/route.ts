@@ -43,7 +43,7 @@ export async function POST(request: Request): Promise<Response> {
     if (result.decision !== "ALLOW") return jsonReply(403, { error: { code: "POLICY_DENIED", message: "The security policy did not approve this export." } }, grant ? { "set-cookie": clearGrantCookie(cookieName) } : undefined);
 
     // The download is built from the authenticated account record returned by the verified API session.
-    const payload = { subject: { id: context.user.id, email: context.user.email, displayName: context.user.displayName }, createdAt: new Date().toISOString() };
+    const payload = { subject: { id: context.user.id, email: context.user.email ?? "", displayName: context.user.displayName }, createdAt: new Date().toISOString() };
     const headers: Record<string, string> = { "content-disposition": `attachment; filename="northstar-account-export.${format}"` };
     if (format === "csv") {
       const esc = (value: string) => `"${value.replaceAll('"', '""')}"`;

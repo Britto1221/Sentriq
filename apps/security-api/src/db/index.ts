@@ -19,7 +19,7 @@ export async function openDatabase(dataDir: string) {
 }
 export type Database = Awaited<ReturnType<typeof openDatabase>>;
 
-const migrationNames = ["0001_foundation", "0002_audit_truncate", "0003_authentication", "0004_recovery_attempts", "0005_policy_step_up", "0006_reclaim_passkey_recovery", "0007_deterministic_policy_modes", "0008_passwordless_email_registration", "0009_device_link", "0010_passkey_management"] as const;
+const migrationNames = ["0001_foundation", "0002_audit_truncate", "0003_authentication", "0004_recovery_attempts", "0005_policy_step_up", "0006_reclaim_passkey_recovery", "0007_deterministic_policy_modes", "0008_passwordless_email_registration", "0009_device_link", "0010_passkey_management", "0011_host_owned_identity"] as const;
 
 async function expectedMigrations() {
   return Promise.all(migrationNames.map(async (name) => {

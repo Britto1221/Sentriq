@@ -42,12 +42,12 @@ describe("database foundation", { timeout: 30_000 }, () => {
         await api.migrateDatabase(first.client);
         const result = await first.client.query<{ tablename: string }>("SELECT tablename FROM pg_tables WHERE schemaname='public'");
         expect(result.rows.map((r) => r.tablename)).toEqual(expect.arrayContaining([
-          "tenants", "applications", "application_api_keys", "users", "retired_password_credentials", "email_verification_transactions", "device_link_requests", "webauthn_credentials",
+          "tenants", "applications", "application_api_keys", "users", "retired_password_credentials", "retired_email_verification_transactions", "passkey_enrollment_transactions", "device_link_requests", "webauthn_credentials",
           "webauthn_challenges", "sessions", "policies", "protected_actions", "step_up_grants", "user_resources",
           "recovery_codes", "audit_events",
         ]));
         await first.client.query("INSERT INTO tenants(id,name) VALUES ($1,$2)", ["persistent", "Persisted"]);
-        expect((await first.client.query("SELECT * FROM schema_migrations")).rows).toHaveLength(10);
+        expect((await first.client.query("SELECT * FROM schema_migrations")).rows).toHaveLength(11);
       } finally { await first.client.close(); }
       const second = await api.openDatabase(join(dir, "db"));
       try { expect((await second.client.query("SELECT name FROM tenants WHERE id='persistent'")).rows).toEqual([{ name: "Persisted" }]); }
@@ -55,16 +55,18 @@ describe("database foundation", { timeout: 30_000 }, () => {
     } finally { await rm(dir, { recursive: true, force: true }); }
   }, 30_000);
 
-  it("enforces normalized email uniqueness per application and digest-only credentials", async () => {
+  it("accepts email-less host identities and keeps optional email uniqueness separate from credentials", async () => {
     const db = await fixture();
     try {
+      await db.client.exec("INSERT INTO users(id,tenant_id,application_id,email,display_name) VALUES ('host-no-email','t1','a1',NULL,'Host Identity')");
+      expect((await db.client.query("SELECT id FROM users WHERE id='host-no-email' AND email IS NULL")).rows).toHaveLength(1);
       await expect(db.client.exec("INSERT INTO users(id,tenant_id,application_id,email,display_name) VALUES ('dup','t1','a1','alice@example.test','Duplicate')")).rejects.toMatchObject({ code: "23505" });
       await expect(db.client.exec("INSERT INTO users(id,tenant_id,application_id,email,display_name) VALUES ('upper','t1','a1','Alice@example.test','Upper')")).rejects.toMatchObject({ code: "23514" });
       await expect(db.client.exec("INSERT INTO application_api_keys(id,tenant_id,application_id,digest) VALUES ('key','t1','a1','raw-key')")).rejects.toMatchObject({ code: "23514" });
-      const secretColumns = await db.client.query<{ table_name: string; column_name: string }>("SELECT table_name,column_name FROM information_schema.columns WHERE table_name IN ('application_api_keys','sessions','recovery_codes','email_verification_transactions')");
+      const secretColumns = await db.client.query<{ table_name: string; column_name: string }>("SELECT table_name,column_name FROM information_schema.columns WHERE table_name IN ('application_api_keys','sessions','recovery_codes','retired_email_verification_transactions','passkey_enrollment_transactions')");
       expect(secretColumns.rows.some((r) => r.column_name === "token")).toBe(false);
       expect(secretColumns.rows.some((r) => r.column_name === "api_key")).toBe(false);
-      expect(secretColumns.rows.some((r) => r.table_name === "email_verification_transactions" && r.column_name === "verification_code")).toBe(false);
+      expect(secretColumns.rows.some((r) => r.table_name === "retired_email_verification_transactions" && r.column_name === "verification_code")).toBe(false);
       expect((await db.client.query("SELECT tablename FROM pg_tables WHERE schemaname='public' AND tablename='password_credentials'")).rows).toHaveLength(0);
       expect((await db.client.query("SELECT tablename FROM pg_tables WHERE schemaname='public' AND tablename='retired_password_credentials'")).rows).toHaveLength(1);
     } finally { await db.client.close(); }

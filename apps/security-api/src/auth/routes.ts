@@ -5,20 +5,19 @@ import { z } from "zod";
 import { authenticateApplication, type ApplicationScope } from "../app";
 import { digestToken, type Database } from "../db/index";
 import type { ApiConfig } from "../config";
-import { AuthenticationError, EmailDeliveryUnavailable, createAuthService, sessionCookie, type EmailSender } from "./service";
+import { AuthenticationError, createAuthService, sessionCookie } from "./service";
 
-const email = z.email().trim().toLowerCase().max(254);
+const accountId = z.string().trim().min(1).max(64);
 const empty = z.object({}).strict();
-const emailCode = z.string().regex(/^[A-Za-z0-9_-]{12}$/);
-const originInput = z.object({ origin: z.url().max(300), email: email.optional() }).strict();
+const originInput = z.object({ origin: z.url().max(300), accountId: accountId.optional() }).strict();
 const reclaimToken = z.string().regex(/^[A-Za-z0-9_-]{43}$/);
 const bytes = z.string().regex(/^[A-Za-z0-9_-]+$/).min(1).max(12_000);
 const authenticationResponse = z.object({ id: bytes, rawId: bytes, type: z.literal("public-key"),
   response: z.object({ clientDataJSON: bytes, authenticatorData: bytes, signature: bytes, userHandle: bytes }).strict(),
   clientExtensionResults: z.record(z.string(), z.unknown()), authenticatorAttachment: z.enum(["platform", "cross-platform"]).optional() }).strict();
 
-export async function registerAuthRoutes(app: FastifyInstance, database: Database, config: ApiConfig, emailSender?: EmailSender) {
-  const service = await createAuthService(database, config, emailSender);
+export async function registerAuthRoutes(app: FastifyInstance, database: Database, config: ApiConfig) {
+  const service = await createAuthService(database, config);
   const scope = (request: FastifyRequest) => request.applicationScope as ApplicationScope;
   const opaque = (request: FastifyRequest) => {
     const value = request.headers["x-sentriq-session-token"];
@@ -31,7 +30,6 @@ export async function registerAuthRoutes(app: FastifyInstance, database: Databas
     try { return await fn(parsed.data, request, reply); }
     catch (cause) {
       if (cause instanceof AuthenticationError) return error(request, reply, 401, "UNAUTHORIZED");
-      if (cause instanceof EmailDeliveryUnavailable) return error(request, reply, 503, "EMAIL_UNAVAILABLE");
       throw cause;
     }
   };
@@ -56,26 +54,22 @@ export async function registerAuthRoutes(app: FastifyInstance, database: Databas
     // createRateLimit independently enforces this budget after the global IP limiter.
     // rateLimit() itself skips requests already checked by the global hook.
     const accountLimit = auth.createRateLimit({ max: 8, timeWindow: 60_000, keyGenerator: (request) => {
-      const body = request.body as { email?: unknown } | undefined;
-      const account = typeof body?.email === "string" ? body.email.trim().toLowerCase() : "";
+      const body = request.body as { accountId?: unknown } | undefined;
+      const account = typeof body?.accountId === "string" ? body.accountId.trim() : "";
       return `${request.applicationScope?.applicationId}:${request.routeOptions.url}:${digestToken(account)}`;
     } });
+    const signupLimit = auth.createRateLimit({ max: 8, timeWindow: 60_000, keyGenerator: (request) => `${request.applicationScope?.applicationId}:signup:${digestToken(request.ip)}` });
     const ipLimit = auth.createRateLimit({ max: Math.min(config.rateLimitMax, 100), timeWindow: 60_000,
       keyGenerator: (request) => `${request.applicationScope?.applicationId}:${request.routeOptions.url}:${digestToken(request.ip)}` });
     auth.addHook("preHandler", async (request, reply) => {
       const ip = await ipLimit(request);
-      const body = request.body as { email?: unknown } | undefined;
-      const account = typeof body?.email === "string" ? await accountLimit(request) : undefined;
-      const exceeded = !ip.isAllowed && ip.isExceeded ? ip : account && !account.isAllowed && account.isExceeded ? account : undefined;
+      const body = request.body as { accountId?: unknown } | undefined;
+      const account = typeof body?.accountId === "string" ? await accountLimit(request) : undefined;
+      const signup = request.routeOptions.url?.endsWith("/registration/start") === true ? await signupLimit(request) : undefined;
+      const exceeded = !ip.isAllowed && ip.isExceeded ? ip : account && !account.isAllowed && account.isExceeded ? account : signup && !signup.isAllowed && signup.isExceeded ? signup : undefined;
       if (exceeded) { reply.header("retry-after", exceeded.ttlInSeconds); return error(request, reply, 429, "RATE_LIMITED"); }
     });
-    auth.post("/registration/start", handler(z.object({ email }).strict(), (input, request) => service.registrationStart(scope(request), input.email, request.id)));
-    auth.post("/registration/verify", handler(z.object({ email, code: emailCode }).strict(), (input, request) => service.registrationVerifyEmail(scope(request), input.email, input.code, request.id)));
-    auth.post("/dev/email-inbox", handler(z.object({ email }).strict(), async (input, request, reply) => {
-      if (config.nodeEnv === "production") return error(request, reply, 404, "NOT_FOUND");
-      const result = service.developmentEmailCode(input.email);
-      return result ?? error(request, reply, 404, "NOT_FOUND");
-    }));
+    auth.post("/registration/start", handler(z.object({ displayName: z.string().trim().min(1).max(100), email: z.email().trim().toLowerCase().max(254).optional() }).strict(), (input, request) => service.registrationStart(scope(request), input.displayName, input.email, request.id)));
     auth.get("/session", handler(empty, (_input, request) => service.session(scope(request), opaque(request))));
     auth.get("/sessions", handler(empty, (_input, request) => service.sessions(scope(request), opaque(request))));
     auth.get("/credentials", handler(empty, (_input, request) => service.credentials(scope(request), opaque(request))));
@@ -97,10 +91,10 @@ export async function registerAuthRoutes(app: FastifyInstance, database: Databas
     auth.post("/webauthn/register/options", handler(originInput, (input, request) => service.registrationOptions(scope(request), input.origin, opaque(request), typeof request.headers["x-sentriq-registration-token"] === "string" ? request.headers["x-sentriq-registration-token"] : undefined)));
     auth.post("/webauthn/register/verify", handler(z.object({ challengeId: z.uuid(), response: registrationResponseSchema }).strict(),
       async (input, request, reply) => issueCookie(request, reply, await service.registrationVerify(scope(request), input.challengeId, input.response as RegistrationResponseJSON, opaque(request), typeof request.headers["x-sentriq-registration-token"] === "string" ? request.headers["x-sentriq-registration-token"] : undefined, request.id))));
-    auth.post("/webauthn/login/options", handler(originInput, (input, request) => service.authenticationOptions(scope(request), input.origin, input.email)));
+    auth.post("/webauthn/login/options", handler(originInput, (input, request) => service.authenticationOptions(scope(request), input.origin, input.accountId)));
     auth.post("/webauthn/login/verify", handler(z.object({ challengeId: z.uuid(), response: authenticationResponse }).strict(), async (input, request, reply) =>
       issueCookie(request, reply, await service.authenticationVerify(scope(request), input.challengeId, input.response as AuthenticationResponseJSON, request.id, opaque(request)))));
-    auth.post("/device-links/start", handler(z.object({ email }).strict(), (input, request) => service.deviceLinkStart(scope(request), input.email, request.id)));
+    auth.post("/device-links/start", handler(z.object({ accountId }).strict(), (input, request) => service.deviceLinkStart(scope(request), input.accountId, request.id)));
     auth.get("/device-links/inbox", handler(empty, (_input, request) => service.deviceLinkInbox(scope(request), opaque(request))));
     auth.post("/device-links/status", handler(z.object({ requestId: z.uuid() }).strict(), (input, request) => service.deviceLinkStatus(scope(request), input.requestId, deviceLinkToken(request) ?? "")));
     auth.post("/device-links/approval/options", handler(z.object({ requestId: z.uuid(), origin: z.url().max(300) }).strict(), (input, request) => service.deviceLinkApprovalOptions(scope(request), input.requestId, input.origin, opaque(request))));
@@ -110,8 +104,8 @@ export async function registerAuthRoutes(app: FastifyInstance, database: Databas
     auth.post("/device-links/registration/verify", handler(z.object({ requestId: z.uuid(), challengeId: z.uuid(), response: registrationResponseSchema }).strict(), async (input, request, reply) =>
       issueCookie(request, reply, await service.deviceLinkRegistrationVerify(scope(request), input.requestId, deviceLinkToken(request) ?? "", input.challengeId, input.response as RegistrationResponseJSON, request.id))));
     auth.post("/device-links/cancel", handler(z.object({ requestId: z.uuid() }).strict(), (input, request) => service.deviceLinkCancel(scope(request), input.requestId, deviceLinkToken(request) ?? "")));
-    auth.post("/reclaim/start", handler(z.object({ email }).strict(), (input, request) => service.reclaimStart(scope(request), input.email, request.id)));
-    auth.post("/reclaim/verify", handler(z.object({ email, transaction: reclaimToken, recoveryCode: z.string().regex(/^[A-Za-z0-9_-]{32}$/) }).strict(),
+    auth.post("/reclaim/start", handler(z.object({ accountId }).strict(), (input, request) => service.reclaimStart(scope(request), input.accountId, request.id)));
+    auth.post("/reclaim/verify", handler(z.object({ accountId, transaction: reclaimToken, recoveryCode: z.string().regex(/^[A-Za-z0-9_-]{32}$/) }).strict(),
       (input, request) => service.reclaimVerify(scope(request), input, request.id)));
     auth.post("/reclaim/passkey/options", handler(z.object({ transaction: reclaimToken, origin: z.url().max(300) }).strict(),
       (input, request) => service.reclaimRegistrationOptions(scope(request), input.transaction, input.origin)));

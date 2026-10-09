@@ -12,22 +12,15 @@ async function addVirtualAuthenticator(page: Page) {
   return { cdp, authenticatorId };
 }
 
-async function registerWithPasskey(page: Page, email: string): Promise<string[]> {
+async function registerWithPasskey(page: Page, displayName: string): Promise<{ codes: string[]; accountId: string }> {
   await page.goto("/signup");
   await expect(page.getByRole("heading", { name: "Create your account" })).toBeVisible();
   await expect(page.getByLabel("Password", { exact: true })).toHaveCount(0);
-  await page.getByLabel("Email address", { exact: true }).fill(email);
+  await page.getByLabel("Display name", { exact: true }).fill(displayName);
   await page.getByRole("button", { name: "Continue", exact: true }).click();
-
-  await expect(page.getByRole("heading", { name: "Check your email" })).toBeVisible({ timeout: 15_000 });
-  await page.getByRole("button", { name: "Development only: show the local email code", exact: true }).click();
-  const emailCode = page.getByLabel("Email verification code", { exact: true });
-  await expect(emailCode).toHaveValue(/^[A-Za-z0-9_-]{12}$/, { timeout: 15_000 });
-  const code = await emailCode.inputValue();
-  expect(code).toMatch(/^[A-Za-z0-9_-]{12}$/);
-  await page.getByRole("button", { name: "Verify email", exact: true }).click();
-
   await expect(page.getByRole("heading", { name: "Create your passkey" })).toBeVisible({ timeout: 15_000 });
+  const accountId = (await page.locator(".identity-form .field-help strong").innerText()).trim();
+  expect(accountId.length).toBeGreaterThan(0);
   await page.getByRole("button", { name: "Create passkey", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Save your recovery codes" })).toBeVisible({ timeout: 15_000 });
   const codes = await page.locator(".recovery-code-grid code").allTextContents();
@@ -39,21 +32,20 @@ async function registerWithPasskey(page: Page, email: string): Promise<string[]>
   await expect(page.getByRole("heading", { name: "Your account is ready" })).toBeVisible();
   await page.getByRole("button", { name: "Go to your account", exact: true }).click();
   await expect(page).toHaveURL(/\/dashboard$/, { timeout: 30_000 });
-  await expect(page.getByText(email, { exact: true })).toBeVisible();
-  return codes;
+  return { codes, accountId };
 }
 
-async function loginWithPasskey(page: Page, email: string): Promise<void> {
+async function loginWithPasskey(page: Page, accountId: string): Promise<void> {
   await page.goto("/login");
-  await page.getByLabel("Email address", { exact: true }).fill(email);
+  await page.getByLabel("Account identifier", { exact: true }).fill(accountId);
   await page.getByRole("button", { name: "Sign in with a passkey", exact: true }).click();
   await expect(page).toHaveURL(/\/dashboard$/, { timeout: 30_000 });
-  await expect(page.getByText(email, { exact: true })).toBeVisible();
+  expect(await page.evaluate(async () => (await fetch("/api/auth/session", { cache: "no-store" })).status)).toBe(200);
 }
 
-async function startDeviceLink(page: Page, email: string): Promise<string> {
+async function startDeviceLink(page: Page, accountId: string): Promise<string> {
   await page.goto("/login");
-  await page.getByLabel("Email address", { exact: true }).fill(email);
+  await page.getByLabel("Account identifier", { exact: true }).fill(accountId);
   await page.getByRole("button", { name: "Approve using my existing device", exact: true }).click();
   const code = await page.locator(".device-link-code").last().textContent();
   expect(code).toMatch(/^[A-Z2-9]{6}$/);
@@ -67,18 +59,18 @@ function waitForSessionCheck(page: Page) {
   });
 }
 
-test("the recovery guide is local, bilingual, and does not render secret input", async ({ page }) => {
-  const apiRequests: string[] = [];
+test("Sentriq Assistant guides users in English and Tamil without sending pasted secrets", async ({ page }) => {
+  const assistantBodies: string[] = [];
   page.on("request", (request) => {
-    const path = new URL(request.url()).pathname;
-    if (path.startsWith("/api/") && path !== "/api/auth/session") apiRequests.push(`${request.method()} ${path}`);
+    if (new URL(request.url()).pathname === "/api/assistant" && request.method() === "POST") assistantBodies.push(request.postData() ?? "");
   });
   const sessionCheck = waitForSessionCheck(page);
   await page.goto("/recover");
   await sessionCheck;
   await expect(page.getByText("Checking session…", { exact: true })).toHaveCount(0);
-  await expect(page.getByText(/Rule-based guidance · no AI model is connected/i)).toBeVisible();
-  apiRequests.length = 0;
+  await page.getByRole("button", { name: "Need help signing in?" }).click();
+  await expect(page.getByRole("heading", { name: "Sentriq Assistant" })).toBeVisible();
+  await expect(page.getByText(/Offline guidance is active/i)).toBeVisible();
   await page.screenshot({ path: ".artifacts/visual-review/recovery-desktop.png", fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });
   await page.screenshot({ path: ".artifacts/visual-review/recovery-mobile.png", fullPage: true });
@@ -86,34 +78,61 @@ test("the recovery guide is local, bilingual, and does not render secret input",
   expect(widths.content).toBeLessThanOrEqual(widths.viewport);
   await page.setViewportSize({ width: 1280, height: 900 });
 
-  const question = page.locator("#recovery-guide-question");
+  const question = page.locator("#sentriq-assistant-input");
   await question.fill("I lost my phone yesterday");
-  await page.getByRole("button", { name: "Get guidance", exact: true }).click();
-  await expect(page.getByText(/First check whether another device can use a passkey/i)).toBeVisible();
-  await expect(page.getByText("I lost my phone yesterday", { exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "Send question", exact: true }).click();
+  await expect(page.getByText(/another device that may have your synced passkey/i)).toBeVisible();
+  await expect(page.getByText("I lost my phone yesterday", { exact: true })).toBeVisible();
 
   const secret = "aBcdEF0123456789_XyZ9876543210ab";
+  const requestsBeforeSecret = assistantBodies.length;
   await question.fill(secret);
-  await page.getByRole("button", { name: "Get guidance", exact: true }).click();
-  await expect(page.getByText(/Do not share passwords, recovery codes, or one-time codes in chat/i)).toBeVisible();
+  await page.getByRole("button", { name: "Send question", exact: true }).click();
+  await expect(page.getByText(/I did not send or keep that message/i)).toBeVisible();
   await expect(page.getByText(secret, { exact: true })).toHaveCount(0);
-  await page.locator("#recovery-language").selectOption("ta");
+  expect(assistantBodies).toHaveLength(requestsBeforeSecret);
+  await page.locator("#sentriq-assistant-language").selectOption("ta");
   await expect(page.locator("html")).toHaveAttribute("lang", "ta");
+  await expect(page.getByText("I lost my phone yesterday", { exact: true })).toBeVisible();
   await question.fill("என்னிடம் மீட்பு குறியீடு உள்ளது");
-  await page.getByRole("button", { name: "வழிகாட்டலைப் பெறு", exact: true }).click();
-  await expect(page.getByText(/குறியீட்டை இங்கே ஒட்ட வேண்டாம்/)).toBeVisible();
-  expect(apiRequests).toEqual([]);
+  await page.getByRole("button", { name: "கேள்வியை அனுப்பு", exact: true }).click();
+  await expect(page.getByText(/குறியீட்டை இங்கே பகிர வேண்டாம்/)).toBeVisible();
+  expect(assistantBodies.every((body) => !body.includes(secret))).toBe(true);
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("button", { name: "உள்நுழைவுக்கு உதவி வேண்டுமா?" })).toBeFocused();
 });
 
-test("verified email registration, passwordless login, and server-enforced Shield export", async ({ page }) => {
+test("Sentriq Assistant displays model output as text and cannot execute embedded HTML", async ({ page }) => {
+  let assistantCookieHeader: string | undefined;
+  await page.route("**/api/assistant", async (route) => {
+    if (route.request().method() === "GET") {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ mode: "openai", provider: "OpenAI" }) });
+    } else {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ mode: "openai", text: "<img src=x onerror=alert(1)><script>alert(1)</script>" }) });
+    }
+  });
+  await page.context().addCookies([{ name: "sentriq_session", value: "test-cookie-must-not-be-forwarded", domain: "localhost", path: "/", httpOnly: true }]);
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname === "/api/assistant" && request.method() === "POST") assistantCookieHeader = request.headers().cookie;
+  });
+  await page.goto("/login");
+  await page.getByRole("button", { name: "Need help signing in?" }).click();
+  await page.getByLabel("Type your question").fill("What is a passkey?");
+  await page.getByRole("button", { name: "Send question" }).click();
+  await expect(page.locator(".assistant-log")).toContainText("<img src=x onerror=alert(1)>");
+  await expect(page.locator(".assistant-log img, .assistant-log script")).toHaveCount(0);
+  await expect(page.locator("#sentriq-assistant-panel")).toBeVisible();
+  expect(assistantCookieHeader).toBeUndefined();
+});
+
+test("host-owned registration without email, passwordless login, and server-enforced Shield export", async ({ page }) => {
   test.setTimeout(120_000);
-  const email = `auth-${Date.now()}-${Math.random().toString(36).slice(2, 7)}@northstar.test`;
   const { cdp } = await addVirtualAuthenticator(page);
-  await registerWithPasskey(page, email);
+  const { accountId } = await registerWithPasskey(page, `Auth ${Date.now()}`);
 
   await page.getByRole("button", { name: "Sign out", exact: true }).click();
   await expect(page).toHaveURL(/\/login$/);
-  await loginWithPasskey(page, email);
+  await loginWithPasskey(page, accountId);
 
   await page.goto("/settings/export");
   const directExportStatus = await page.evaluate(async () => (await fetch("/api/protected/export", {
@@ -136,13 +155,13 @@ test("verified email registration, passwordless login, and server-enforced Shiel
 
 test("a used recovery code cannot be replayed and recovery does not create a session", async ({ page }) => {
   test.setTimeout(120_000);
-  const email = `reclaim-${Date.now()}-${Math.random().toString(36).slice(2, 7)}@northstar.test`;
   const oldDevice = await addVirtualAuthenticator(page);
-  const [recoveryCode] = await registerWithPasskey(page, email);
+  const { codes, accountId } = await registerWithPasskey(page, `Reclaim ${Date.now()}`);
+  const recoveryCode = codes[0];
   expect(recoveryCode).toBeTruthy();
 
   await page.goto("/recover");
-  await page.getByLabel("Email address", { exact: true }).fill(email);
+  await page.getByLabel("Account identifier", { exact: true }).fill(accountId);
   await page.getByRole("button", { name: "Begin recovery", exact: true }).click();
   await page.getByLabel("Recovery code", { exact: true }).fill(recoveryCode!);
   await page.getByRole("button", { name: "Verify recovery code", exact: true }).click();
@@ -153,7 +172,7 @@ test("a used recovery code cannot be replayed and recovery does not create a ses
   await expect.poll(async () => await page.evaluate(async () => (await fetch("/api/auth/session", { cache: "no-store" })).status)).toBe(401);
 
   await page.reload();
-  await page.getByLabel("Email address", { exact: true }).fill(email);
+  await page.getByLabel("Account identifier", { exact: true }).fill(accountId);
   await page.getByRole("button", { name: "Begin recovery", exact: true }).click();
   await page.getByLabel("Recovery code", { exact: true }).fill(recoveryCode!);
   await page.getByRole("button", { name: "Verify recovery code", exact: true }).click();
@@ -163,19 +182,24 @@ test("a used recovery code cannot be replayed and recovery does not create a ses
 
 test("Device Link requires existing-device approval and a new browser-bound passkey", async ({ page, browser }: { page: Page; browser: Browser }) => {
   test.setTimeout(150_000);
-  const email = `link-${Date.now()}-${Math.random().toString(36).slice(2, 7)}@northstar.test`;
   const oldPhone = await addVirtualAuthenticator(page);
-  await registerWithPasskey(page, email);
+  const { accountId } = await registerWithPasskey(page, `Device Link ${Date.now()}`);
 
   const newContext = await browser.newContext();
   const newPage = await newContext.newPage();
   const newPhone = await addVirtualAuthenticator(newPage);
-  const requestCode = await startDeviceLink(newPage, email);
+  const requestCode = await startDeviceLink(newPage, accountId);
 
   const sessionCheck = waitForSessionCheck(page);
   await page.goto("/settings/security");
   await sessionCheck;
   await expect(page.getByText("Checking session…", { exact: true })).toHaveCount(0);
+  const inbox = await page.evaluate(async () => {
+    const response = await fetch("/api/auth/device-links/inbox", { cache: "no-store" });
+    const value: unknown = await response.json();
+    return { status: response.status, count: Array.isArray(value) ? value.length : -1 };
+  });
+  expect(inbox).toEqual({ status: 200, count: 1 });
   const request = page.locator(".device-approval-request");
   await expect(request).toBeVisible({ timeout: 20_000 });
   await expect(request.locator(".device-link-code")).toHaveText(requestCode);
@@ -186,7 +210,6 @@ test("Device Link requires existing-device approval and a new browser-bound pass
   await expect(newPage.getByRole("button", { name: "Create passkey on this device", exact: true })).toBeVisible({ timeout: 20_000 });
   await newPage.getByRole("button", { name: "Create passkey on this device", exact: true }).click();
   await expect(newPage).toHaveURL(/\/dashboard$/);
-  await expect(newPage.getByText(email, { exact: true })).toBeVisible();
   expect(await page.evaluate(async () => (await fetch("/api/auth/session", { cache: "no-store" })).status)).toBe(200);
 
   const credentials = await newPhone.cdp.send("WebAuthn.getCredentials", { authenticatorId: newPhone.authenticatorId });
@@ -208,7 +231,7 @@ test("Device Link requires existing-device approval and a new browser-bound pass
   expect(await page.evaluate(async () => (await fetch("/api/auth/session", { cache: "no-store" })).status)).toBe(200);
 
   await newPage.getByRole("button", { name: "Sign out", exact: true }).click();
-  await loginWithPasskey(newPage, email);
+  await loginWithPasskey(newPage, accountId);
 
   await oldPhone.cdp.detach();
   await newPhone.cdp.detach();

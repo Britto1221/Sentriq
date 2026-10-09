@@ -101,8 +101,8 @@ describe("Sentriq server SDK", () => {
     });
     const client = new SentriqClient({ baseUrl: "http://localhost:4100", applicationId: "northstar", apiKey: "test-secret-that-is-never-logged-123" }, fetcher);
 
-    await expect(client.reclaimStart({ email: "alice@example.test" })).resolves.toMatchObject({ status: "accepted", transaction });
-    await expect(client.reclaimVerify({ email: "alice@example.test", transaction, recoveryCode: "A".repeat(32) })).resolves.toEqual({ status: "verified", expiresIn: 600 });
+    await expect(client.reclaimStart({ accountId: "alice-account" })).resolves.toMatchObject({ status: "accepted", transaction });
+    await expect(client.reclaimVerify({ accountId: "alice-account", transaction, recoveryCode: "A".repeat(32) })).resolves.toEqual({ status: "verified", expiresIn: 600 });
     await expect(client.reclaimRegistrationOptions({ transaction, origin: "http://localhost:3000" })).resolves.toMatchObject({ challengeId: "66b01ab4-236f-498f-8dde-dc1df5be96c4" });
     const [, optionsInit] = fetcher.mock.calls[2] as [string, RequestInit];
     expect(new Headers(optionsInit.headers).get("x-sentriq-session-token")).toBeNull();

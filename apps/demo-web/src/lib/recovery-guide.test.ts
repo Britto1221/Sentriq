@@ -7,7 +7,7 @@ describe("deterministic recovery guide", () => {
     expect(reply.state).toBe("START");
     expect(reply.messageKey).toBe("lostDevice");
     expect(reply.destination).toBe("/recover");
-    expect(reply.messageKey).not.toContain("I lost my phone");
+    expect(reply.messageKey.includes("I lost my phone")).toBe(false);
   });
 
   it("recognizes Tamil recovery questions and returns Tamil guide keys", () => {
@@ -21,7 +21,7 @@ describe("deterministic recovery guide", () => {
     expect(reply.secretDetected).toBe(true);
     expect(reply.messageKey).toBe("secretSafety");
     expect(reply.destination).toBe("/recover");
-    expect(JSON.stringify(reply)).not.toContain(code);
+    expect(JSON.stringify(reply).includes(code)).toBe(false);
   });
 
   it("does not offer a bypass when the user has no registered passkey or recovery method", () => {

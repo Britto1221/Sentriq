@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useState, type FormEvent } from "react";
 import { startRegistration } from "@sentriq/browser";
 
-type Phase = "email" | "verification" | "passkey" | "complete";
+type Phase = "details" | "passkey" | "complete";
 
 async function post<T>(url: string, value: unknown): Promise<T> {
   const response = await fetch(url, { method: "POST", credentials: "same-origin", cache: "no-store", headers: { "content-type": "application/json" }, body: JSON.stringify(value) });
@@ -14,31 +14,21 @@ async function post<T>(url: string, value: unknown): Promise<T> {
 }
 
 export function RegistrationFlow() {
-  const [phase, setPhase] = useState<Phase>("email");
-  const [email, setEmail] = useState("");
-  const [code, setCode] = useState("");
-  const [localCode, setLocalCode] = useState("");
+  const [phase, setPhase] = useState<Phase>("details");
+  const [displayName, setDisplayName] = useState("");
+  const [accountId, setAccountId] = useState("");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
 
   async function begin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setBusy(true); setMessage("");
-    try { const result = await post<{ message: string }>("/api/registration/start", { email }); setMessage(result.message); setPhase("verification"); }
-    catch (error) { setMessage(error instanceof Error ? error.message : "Email verification could not start."); }
+    try {
+      const result = await post<{ message: string; accountId: string }>("/api/registration/start", { displayName });
+      setAccountId(result.accountId); setMessage(result.message); setPhase("passkey");
+    } catch (error) { setMessage(error instanceof Error ? error.message : "Account registration could not start."); }
     finally { setBusy(false); }
   }
-  async function loadLocalCode() {
-    setBusy(true); setMessage("");
-    try { const response = await fetch(`/api/dev-inbox?email=${encodeURIComponent(email)}`, { cache: "no-store" }); const value: unknown = await response.json(); if (!response.ok || !value || typeof value !== "object" || !("code" in value) || typeof value.code !== "string") throw new Error("No local verification message is available."); setLocalCode(value.code); setCode(value.code); setMessage("Local-only development inbox: code loaded."); }
-    catch (error) { setMessage(error instanceof Error ? error.message : "The local inbox could not be read."); }
-    finally { setBusy(false); }
-  }
-  async function verify(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault(); setBusy(true); setMessage("");
-    try { const result = await post<{ message: string }>("/api/registration/verify", { email, code }); setMessage(result.message); setPhase("passkey"); }
-    catch (error) { setMessage(error instanceof Error ? error.message : "The verification code was rejected."); }
-    finally { setBusy(false); }
-  }
+
   async function createPasskey() {
     setBusy(true); setMessage("");
     try {
@@ -54,12 +44,14 @@ export function RegistrationFlow() {
     <Link className="back" href="/">← Back</Link>
     <section className="panel" aria-labelledby="register-title">
       <p className="eyebrow">Host-owned account</p><h1 id="register-title">Create an account</h1>
-      <ol className="steps" aria-label="Registration steps"><li aria-current={phase === "email" ? "step" : undefined}>Email</li><li aria-current={phase === "verification" ? "step" : undefined}>Verify</li><li aria-current={phase === "passkey" ? "step" : undefined}>Passkey</li></ol>
-      {phase === "email" ? <form onSubmit={(event) => void begin(event)}><label htmlFor="email">Email address</label><input id="email" type="email" autoComplete="email" maxLength={254} required value={email} onChange={(event) => setEmail(event.target.value)} /><button className="button primary" disabled={busy}>{busy ? "Sending…" : "Continue"}</button></form> : null}
-      {phase === "verification" ? <form onSubmit={(event) => void verify(event)}><label htmlFor="verify-email">Email address</label><input id="verify-email" value={email} readOnly /><label htmlFor="email-code">Verification code</label><input id="email-code" type="text" autoComplete="one-time-code" inputMode="text" maxLength={64} required value={code} onChange={(event) => setCode(event.target.value.trim())} />
-        <button className="button primary" disabled={busy || !code}>Verify email</button><button className="button" type="button" disabled={busy} onClick={() => void loadLocalCode()}>Read local development inbox</button>{localCode ? <p className="hint">This inbox is available only in local development.</p> : null}</form> : null}
+      <ol className="steps" aria-label="Registration steps"><li aria-current={phase === "details" ? "step" : undefined}>Account</li><li aria-current={phase === "passkey" ? "step" : undefined}>Passkey</li></ol>
+      {phase === "details" ? <form onSubmit={(event) => void begin(event)}>
+        <label htmlFor="display-name">Your name</label><input id="display-name" name="displayName" autoComplete="name" maxLength={100} required value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
+        <p className="hint">The host application creates a private account ID. Email is optional and is not used to identify or authorize you.</p>
+        <button className="button primary" disabled={busy || !displayName.trim()}>{busy ? "Creating account…" : "Continue"}</button>
+      </form> : null}
       {phase === "passkey" ? <div><p>Use your phone or computer's built-in unlock method, or a security key. Sentriq receives the signed passkey response, not biometric data.</p><button className="button primary" disabled={busy} onClick={() => void createPasskey()}>{busy ? "Waiting for authenticator…" : "Create passkey"}</button></div> : null}
-      {phase === "complete" ? <div><p>Your passkey is registered. This sample integration does not yet issue Reclaim recovery codes.</p><Link className="button primary" href="/login">Continue to sign in</Link></div> : null}
+      {phase === "complete" ? <div><p>Your passkey is registered. Your host account ID is <code>{accountId}</code>.</p><p>This independent SDK example currently demonstrates host-owned account identity and passkey authentication. It does not claim to expose Reclaim, Shield, or Device Link.</p><Link className="button primary" href="/login">Continue to sign in</Link></div> : null}
       <p className="status" role="status" aria-live="polite">{message}</p>
     </section>
   </main>;

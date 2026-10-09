@@ -19,6 +19,32 @@ Defaults: `127.0.0.1:4000`, persistent PGlite data at `.data/security-api`, and 
 
 Production requires explicit TLS termination and persistent absolute storage. The reverse proxy, network restrictions, backups, volume permissions, and secret rotation remain operator responsibilities. Forwarded IP headers are not trusted; current in-memory limits do not coordinate multiple instances.
 
+## Single-application production bootstrap
+
+Sentriq does not send email or require email to identify an account. The host application owns account creation and may keep email as an optional profile attribute.
+
+For the Northstar demonstration only, configure a persistent mounted directory and HTTPS origin, then run the following from the repository root **after the volume is mounted**:
+
+```sh
+pnpm --filter @sentriq/security-api db:migrate
+pnpm --filter @sentriq/security-api seed:production
+pnpm --filter @sentriq/security-api start
+```
+
+`seed:production` is idempotent and refuses an existing application whose tenant, HTTPS origin, RP ID, or enabled action policy differs. It does not create users. Configure these server-only values on the API service:
+
+- `SENTRIQ_BOOTSTRAP_TENANT_ID`
+- `SENTRIQ_BOOTSTRAP_TENANT_NAME`
+- `SENTRIQ_BOOTSTRAP_APPLICATION_ID`
+- `SENTRIQ_BOOTSTRAP_APPLICATION_NAME`
+- `SENTRIQ_BOOTSTRAP_ORIGIN`: exact Northstar HTTPS origin.
+- `SENTRIQ_BOOTSTRAP_RP_ID`: Northstar origin hostname, without scheme or port.
+- `SENTRIQ_BOOTSTRAP_APPLICATION_KEY`: a cryptographically generated 32-byte base64url value (43 characters). The API stores only its SHA-256 digest. Put the same value in Northstar's server-only `SENTRIQ_APPLICATION_KEY`; never put it in browser variables or source control.
+
+Also set `NODE_ENV=production`, `SENTRIQ_HOST=0.0.0.0`, `SENTRIQ_PORT` to the service's internal port, `SENTRIQ_DATA_DIR` to an absolute path on persistent storage, and `SENTRIQ_TLS_TERMINATED=true` only behind an HTTPS proxy. Apply migrations and bootstrap from the service start command, not Railway's pre-deploy command: Railway volumes are not mounted for pre-deploy commands. Keep this single-process PGlite deployment at one replica. It is a hackathon demonstration configuration, not a production database recommendation.
+
+Changing the bootstrap API key does not silently rotate database credentials; startup fails closed if the persisted key differs. Perform a separately reviewed key rotation before changing it.
+
 ## Verification
 
 Run `pnpm --filter @sentriq/security-api typecheck` and root `pnpm test`. The auth and policy suites use PGlite and generated software WebAuthn assertions through the actual SimpleWebAuthn verifier. They are not physical authenticator or production PostgreSQL verification.

@@ -7,6 +7,7 @@ minimumReleaseAgeExclude:
   - '@playwright/test@1.64.0'
   - playwright-core@1.64.0
   - playwright@1.64.0
+  - openai@7.30.1
 allowBuilds:
   esbuild: true
   argon2: true

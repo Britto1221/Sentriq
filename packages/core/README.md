@@ -38,9 +38,17 @@ const passkeys = createPasskeyServer({
 });
 
 // account must be loaded from the host's trusted account/session boundary.
-const options = await passkeys.registrationOptions({ account, origin: requestOrigin });
+// `registrationContext` is a short-lived, random grant issued by the host
+// only after a trusted account-creation or freshly authenticated account
+// settings flow. It is not an account identifier supplied by the browser.
+const options = await passkeys.registrationOptions({
+  account,
+  origin: requestOrigin,
+  registrationContext: hostIssuedEnrollmentGrant,
+});
 const registered = await passkeys.registrationVerify({
   account,
+  registrationContext: hostIssuedEnrollmentGrant,
   challengeId: request.body.challengeId,
   response: request.body.response,
 });
@@ -53,10 +61,11 @@ const login = await passkeys.authenticationVerify({
 // `login.session` came from the host adapter; set the host's HttpOnly cookie.
 ```
 
-Email verification is host-owned. The server must pass an account with
-`emailVerified: true` and `active: true` only after checking it through its own
-trusted records. Never accept an account identifier from the browser as proof
-of authorization.
+The host application owns account creation and account status. Pass a host
+account only after loading it through a trusted session or account-creation
+boundary. Optional email metadata does not establish identity or authorize
+credential enrollment. Never accept an account identifier from the browser as
+proof of authorization.
 
 ## Security limits
 

@@ -11,8 +11,9 @@ const key2 = randomBytes(32).toString("base64url");
 const origin = "http://localhost:3001";
 const secret = () => randomBytes(24).toString("base64url");
 const opaqueSecret = () => randomBytes(32).toString("base64url");
-function request(path: string, payload?: object, token?: string, applicationKey = key) {
-  return app.inject({ method: payload === undefined ? "GET" : "POST", url: `/v1/auth${path}`,
+let syntheticSource = 10;
+function request(path: string, payload?: object, token?: string, applicationKey = key, remoteAddress?: string) {
+  return app.inject({ method: payload === undefined ? "GET" : "POST", url: `/v1/auth${path}`, ...(remoteAddress ? { remoteAddress } : {}),
     headers: { "x-sentriq-api-key": applicationKey, ...(token ? { "x-sentriq-session-token": token } : {}) }, payload });
 }
 function policyRequest(path: string, payload: object, token?: string) {
@@ -25,8 +26,7 @@ function tokenFrom(response: { headers: Record<string, unknown> }): string {
   return cookie.split(";")[0]!.split("=")[1]!;
 }
 async function account() {
-  const email = `${secret()}@synthetic.test`;
-  const registration = await pendingRegistration(email);
+  const registration = await pendingRegistration();
   const registrationToken = registration.registrationToken;
   const options = await app.inject({ method: "POST", url: "/v1/auth/webauthn/register/options", headers: { "x-sentriq-api-key": key, "x-sentriq-registration-token": registrationToken }, payload: { origin } });
   expect(options.statusCode).toBe(200);
@@ -35,15 +35,12 @@ async function account() {
     challengeId: options.json().challengeId, response: authenticator.registration(options.json().options.challenge),
   } });
   expect(completed.statusCode).toBe(200);
-  return { email, token: tokenFrom(completed), user: completed.json().user, authenticator, recoveryCodes: completed.json().recoveryCodes as string[] };
+  return { token: tokenFrom(completed), user: completed.json().user, accountId: registration.accountId, authenticator, recoveryCodes: completed.json().recoveryCodes as string[] };
 }
-async function pendingRegistration(email = `${secret()}@synthetic.test`) {
-  expect((await request("/registration/start", { email })).statusCode).toBe(200);
-  const inbox = await request("/dev/email-inbox", { email });
-  expect(inbox.statusCode).toBe(200);
-  const verification = await request("/registration/verify", { email, code: inbox.json().verificationCode });
-  expect(verification.statusCode).toBe(200);
-  return { email, registrationToken: verification.json().registrationToken as string };
+async function pendingRegistration(displayName = "Northstar user") {
+  const started = await request("/registration/start", { displayName }, undefined, key, `198.51.100.${(syntheticSource++ % 240) + 10}`);
+  expect(started.statusCode).toBe(200);
+  return { accountId: started.json().accountId as string, registrationToken: started.json().registrationToken as string };
 }
 async function registrationOptions(registrationToken: string, registrationOrigin = origin) {
   return app.inject({ method: "POST", url: "/v1/auth/webauthn/register/options", headers: {
@@ -60,8 +57,8 @@ async function enrollment(identity: Awaited<ReturnType<typeof account>>) {
   void identity;
   return identity.authenticator;
 }
-async function signIn(identity: Awaited<ReturnType<typeof account>>, email = identity.email) {
-  const options = await request("/webauthn/login/options", { origin, email });
+async function signIn(identity: Awaited<ReturnType<typeof account>>, accountId?: string) {
+  const options = await request("/webauthn/login/options", { origin, ...(accountId ? { accountId } : {}) });
   expect(options.statusCode).toBe(200);
   return request("/webauthn/login/verify", { challengeId: options.json().challengeId,
     response: identity.authenticator.assertion(options.json().options.challenge, identity.user.id) });
@@ -76,24 +73,17 @@ beforeAll(async () => {
 afterAll(async () => { await app?.close(); await db?.client.close(); });
 
 describe("real authentication", { timeout: 60_000 }, () => {
-  it("registers only after email verification and a verified first passkey, then issues six recovery codes", async () => {
-    const email = `${secret()}@synthetic.test`;
-    const started = await request("/registration/start", { email });
+  it("registers a host-owned account without email delivery and issues six recovery codes after passkey verification", async () => {
+    const started = await request("/registration/start", { displayName: "No Email User" });
     expect(started.statusCode).toBe(200);
-    expect(started.json()).toEqual({ status: "accepted" });
-    expect((await db.client.query("SELECT id FROM users WHERE tenant_id='auth-tenant' AND application_id='auth-app' AND email=$1", [email])).rows).toHaveLength(0);
+    expect(started.json().registrationToken).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(started.json().accountId).toBeTruthy();
 
-    const inbox = await request("/dev/email-inbox", { email });
-    expect(inbox.statusCode).toBe(200);
-    expect(inbox.json().verificationCode).toMatch(/^[A-Za-z0-9_-]{12}$/);
-    const verified = await request("/registration/verify", { email, code: inbox.json().verificationCode });
-    expect(verified.statusCode).toBe(200);
-    expect(verified.json().registrationToken).toMatch(/^[A-Za-z0-9_-]{43}$/);
-
-    const registrationToken = verified.json().registrationToken as string;
-    const transactionRow = (await db.client.query<{ state: string; user_id: string | null; expires_at: Date }>("SELECT state,user_id,expires_at FROM email_verification_transactions WHERE registration_digest=$1", [digestToken(registrationToken)])).rows[0];
-    expect(transactionRow?.state).toBe("VERIFIED");
+    const registrationToken = started.json().registrationToken as string;
+    const transactionRow = (await db.client.query<{ state: string; user_id: string | null; expires_at: Date }>("SELECT state,user_id,expires_at FROM passkey_enrollment_transactions WHERE token_digest=$1", [digestToken(registrationToken)])).rows[0];
+    expect(transactionRow?.state).toBe("PENDING");
     expect(transactionRow?.user_id).toBeTruthy();
+    expect((await db.client.query("SELECT id FROM users WHERE id=$1 AND email IS NULL", [started.json().accountId])).rows).toHaveLength(1);
     const options = await app.inject({ method: "POST", url: "/v1/auth/webauthn/register/options", headers: {
       "x-sentriq-api-key": key, "x-sentriq-registration-token": registrationToken,
     }, payload: { origin } });
@@ -106,14 +96,14 @@ describe("real authentication", { timeout: 60_000 }, () => {
     expect(completed.json().recoveryCodes).toHaveLength(6);
     expect(String(completed.headers["set-cookie"])).toContain("HttpOnly");
     expect((await request("/session", undefined, tokenFrom(completed))).statusCode).toBe(200);
-    expect((await app.inject({ method: "POST", url: "/v1/auth/signup", headers: { "x-sentriq-api-key": key }, payload: { email, password: secret(), displayName: "No password" } })).statusCode).toBe(404);
-    expect((await app.inject({ method: "POST", url: "/v1/auth/login", headers: { "x-sentriq-api-key": key }, payload: { email, password: secret() } })).statusCode).toBe(404);
+    expect((await app.inject({ method: "POST", url: "/v1/auth/signup", headers: { "x-sentriq-api-key": key }, payload: { email: "name@example.test", password: secret(), displayName: "No password" } })).statusCode).toBe(404);
+    expect((await app.inject({ method: "POST", url: "/v1/auth/login", headers: { "x-sentriq-api-key": key }, payload: { email: "name@example.test", password: secret() } })).statusCode).toBe(404);
   });
 
   it("links a new device only after its matching request receives fresh passkey approval", async () => {
     const existing = await account();
     const outsider = await account();
-    const started = await request("/device-links/start", { email: existing.email });
+    const started = await request("/device-links/start", { accountId: existing.user.id });
     expect(started.statusCode).toBe(200);
     expect(started.json().comparisonCode).toMatch(/^[A-Z2-9]{6}$/);
     const { requestId, transaction, comparisonCode } = started.json() as { requestId: string; transaction: string; comparisonCode: string };
@@ -166,12 +156,12 @@ describe("real authentication", { timeout: 60_000 }, () => {
       requestId, challengeId: enrollment.json().challengeId,
       response: newPhone.registration(enrollment.json().options.challenge),
     }, transaction)).statusCode).toBe(401);
-    const loginOptions = await request("/webauthn/login/options", { origin, email: existing.email });
+    const loginOptions = await request("/webauthn/login/options", { origin, accountId: existing.user.id });
     const newLogin = await request("/webauthn/login/verify", { challengeId: loginOptions.json().challengeId,
       response: newPhone.assertion(loginOptions.json().options.challenge, existing.user.id) });
     expect(newLogin.statusCode).toBe(200);
 
-    const rejectedRequest = await request("/device-links/start", { email: existing.email });
+    const rejectedRequest = await request("/device-links/start", { accountId: existing.user.id });
     const rejectedRequestId = rejectedRequest.json().requestId as string;
     const rejectedToken = rejectedRequest.json().transaction as string;
     expect((await request("/device-links/reject", { requestId: rejectedRequestId }, existing.token)).statusCode).toBe(200);
@@ -182,8 +172,8 @@ describe("real authentication", { timeout: 60_000 }, () => {
   it("requires app credentials and exposes no password authentication route", async () => {
     expect((await app.inject({ method: "POST", url: "/v1/auth/registration/start", payload: { email: "missing@synthetic.test" } })).statusCode).toBe(401);
     const identity = await account();
-    expect((await app.inject({ method: "POST", url: "/v1/auth/signup", headers: { "x-sentriq-api-key": key }, payload: { email: identity.email, password: secret(), displayName: "Legacy" } })).statusCode).toBe(404);
-    expect((await app.inject({ method: "POST", url: "/v1/auth/login", headers: { "x-sentriq-api-key": key }, payload: { email: identity.email, password: secret() } })).statusCode).toBe(404);
+    expect((await app.inject({ method: "POST", url: "/v1/auth/signup", headers: { "x-sentriq-api-key": key }, payload: { email: identity.user.id, password: secret(), displayName: "Legacy" } })).statusCode).toBe(404);
+    expect((await app.inject({ method: "POST", url: "/v1/auth/login", headers: { "x-sentriq-api-key": key }, payload: { email: identity.user.id, password: secret() } })).statusCode).toBe(404);
     const response = await signIn(identity);
     expect(response.statusCode).toBe(200);
     expect(response.json().token).toBeUndefined(); expect(response.json().sessionToken).toBeUndefined();
@@ -192,12 +182,11 @@ describe("real authentication", { timeout: 60_000 }, () => {
     expect(response.headers["cache-control"]).toBe("no-store");
     expect((await db.client.query("SELECT tablename FROM pg_tables WHERE schemaname='public' AND tablename='password_credentials'")).rows).toHaveLength(0);
   });
-  it("returns identical generic failures for an unknown account and an account-email mismatch", async () => {
+  it("authenticates by host account ID and never treats email-like input as identity", async () => {
     const identity = await account();
-    const known = await signIn(identity, `${secret()}@synthetic.test`);
+    const known = await signIn(identity, identity.accountId);
     const unknown = await signIn(identity, `${secret()}@synthetic.test`);
-    expect(known.statusCode).toBe(401); expect(unknown.statusCode).toBe(401);
-    expect({ code: known.json().error.code, message: known.json().error.message }).toEqual({ code: unknown.json().error.code, message: unknown.json().error.message });
+    expect(known.statusCode).toBe(200); expect(unknown.statusCode).toBe(401);
   });
   it("returns only the authenticated user's safe security events", async () => {
     const identity = await account();
@@ -224,7 +213,7 @@ describe("real authentication", { timeout: 60_000 }, () => {
     try {
       const productionOrigin = "https://login.synthetic.test";
       await db.client.query("UPDATE applications SET origins=$1,rp_id='synthetic.test' WHERE id='auth-app'", [JSON.stringify([productionOrigin])]);
-      const options = await production.inject({ method: "POST", url: "/v1/auth/webauthn/login/options", headers: { "x-sentriq-api-key": key }, payload: { origin: productionOrigin, email: identity.email } });
+      const options = await production.inject({ method: "POST", url: "/v1/auth/webauthn/login/options", headers: { "x-sentriq-api-key": key }, payload: { origin: productionOrigin, accountId: identity.user.id } });
       const login = await production.inject({ method: "POST", url: "/v1/auth/webauthn/login/verify", headers: { "x-sentriq-api-key": key }, payload: {
         challengeId: options.json().challengeId, response: identity.authenticator.assertion(options.json().options.challenge, identity.user.id, { origin: productionOrigin, rpId: "synthetic.test" }),
       } });
@@ -251,7 +240,7 @@ describe("real authentication", { timeout: 60_000 }, () => {
   it("verifies real passkey registration and email-bound signed login, then advances the authenticator counter", async () => {
     const identity = await account(); const auth = await enrollment(identity);
     expect((await db.client.query("SELECT id FROM webauthn_credentials WHERE user_id=$1", [identity.user.id])).rows).toHaveLength(1);
-    const options = await request("/webauthn/login/options", { origin, email: identity.email });
+    const options = await request("/webauthn/login/options", { origin, accountId: identity.user.id });
     expect(options.json().options.userVerification).toBe("required");
     const response = await request("/webauthn/login/verify", { challengeId: options.json().challengeId, response: auth.assertion(options.json().options.challenge, identity.user.id) });
     expect(response.statusCode).toBe(200);
@@ -263,7 +252,7 @@ describe("real authentication", { timeout: 60_000 }, () => {
   it("lists and renames only owned passkey metadata, and removes a credential only with a matching one-use Shield grant", async () => {
     const identity = await account();
     const other = await account();
-    const link = await request("/device-links/start", { email: identity.email });
+    const link = await request("/device-links/start", { accountId: identity.user.id });
     const linkId = link.json().requestId as string;
     const linkTransaction = link.json().transaction as string;
     const approvalOptions = await request("/device-links/approval/options", { requestId: linkId, origin }, identity.token);
@@ -364,7 +353,7 @@ describe("real authentication", { timeout: 60_000 }, () => {
     }, payload: { challengeId: options.challengeId, response: auth.registration(options.options.challenge, origin, "localhost", true, clientData) } });
     expect(response.statusCode).toBe(401);
     expect(response.json().error.message).toBe("Authentication failed");
-    expect((await db.client.query("SELECT id FROM webauthn_credentials WHERE user_id=(SELECT id FROM users WHERE email=$1)", [registration.email])).rows).toHaveLength(0);
+    expect((await db.client.query("SELECT id FROM webauthn_credentials WHERE user_id=(SELECT id FROM users WHERE id=$1)", [registration.accountId])).rows).toHaveLength(0);
   });
   it("rejects unregistered origins, registration without UV and registration from another session", async () => {
     const unverified = await pendingRegistration();
@@ -436,34 +425,33 @@ describe("real authentication", { timeout: 60_000 }, () => {
   it("does not expose the retired password-reset recovery bypass", async () => {
     expect((await request("/recovery/start", { email: "alice@synthetic.test" })).statusCode).toBe(404);
     expect((await request("/recovery/complete", { email: "alice@synthetic.test", code: "A".repeat(32), newPassword: secret(), attempt: secret() })).statusCode).toBe(404);
-  });  it("rate limits repeated email registration requests", async () => {
-    const email = `${secret()}@synthetic.test`;
+  });  it("rate limits host-account registration per source", async () => {
     const statuses = [];
-    for (let i = 0; i < 9; i++) statuses.push((await request("/registration/start", { email })).statusCode);
+    for (let i = 0; i < 9; i++) statuses.push((await request("/registration/start", { displayName: "Rate test" })).statusCode);
     expect(statuses).toContain(429);
   });
-  it("cannot bypass email registration throttling by changing an unverified session header", async () => {
-    const email = `${secret()}@synthetic.test`; const statuses = [];
-    for (let i = 0; i < 9; i++) statuses.push((await request("/registration/start", { email }, secret())).statusCode);
+  it("cannot bypass registration throttling by changing an untrusted session header", async () => {
+    const statuses = [];
+    for (let i = 0; i < 9; i++) statuses.push((await request("/registration/start", { displayName: "Rate test" }, secret())).statusCode);
     expect(statuses).toContain(429);
   });
-  it("shares the account throttle across different caller IP addresses", async () => {
-    const email = `${secret()}@synthetic.test`; const statuses = [];
+  it("keeps registration source limits independent when callers have distinct addresses", async () => {
+    const statuses = [];
     for (let i = 0; i < 9; i++) statuses.push((await app.inject({ method: "POST", url: "/v1/auth/registration/start", remoteAddress: `192.0.2.${i + 1}`,
-      headers: { "x-sentriq-api-key": key }, payload: { email } })).statusCode);
-    expect(statuses).toContain(429);
+      headers: { "x-sentriq-api-key": key }, payload: { displayName: "Rate test" } })).statusCode);
+    expect(statuses.every((status) => status === 200)).toBe(true);
   });
   it("recovers through a restricted transaction, replaces passkeys, revokes sessions and rotates recovery codes", async () => {
     const identity = await account(); const oldAuthenticator = await enrollment(identity);
     const secondSession = tokenFrom(await signIn(identity));
     const oldCodes = identity.recoveryCodes;
-    const started = await request("/reclaim/start", { email: identity.email });
+    const started = await request("/reclaim/start", { accountId: identity.user.id });
     expect(started.statusCode).toBe(200);
     expect(started.json().status).toBe("accepted");
     expect(started.headers["set-cookie"]).toBeUndefined();
     const transaction = started.json().transaction as string;
 
-    const proof = await request("/reclaim/verify", { email: identity.email, transaction, recoveryCode: oldCodes[0] });
+    const proof = await request("/reclaim/verify", { accountId: identity.user.id, transaction, recoveryCode: oldCodes[0] });
     expect(proof.statusCode).toBe(200);
     expect(proof.json().status).toBe("verified");
     expect(proof.headers["set-cookie"]).toBeUndefined();
@@ -491,7 +479,7 @@ describe("real authentication", { timeout: 60_000 }, () => {
     const storedCodes = (await db.client.query<{ verifier: string; consumed_at: unknown }>("SELECT verifier,consumed_at FROM recovery_codes WHERE tenant_id='auth-tenant' AND application_id='auth-app' AND user_id=$1", [identity.user.id])).rows;
     expect(storedCodes).toHaveLength(12);
     expect(storedCodes.every((row) => row.consumed_at !== null || !replacementCodes.some((code) => row.verifier.includes(code)))).toBe(true);
-    expect((await request("/reclaim/verify", { email: identity.email, transaction, recoveryCode: oldCodes[0] })).statusCode).toBe(401);
+    expect((await request("/reclaim/verify", { accountId: identity.user.id, transaction, recoveryCode: oldCodes[0] })).statusCode).toBe(401);
     expect((await db.client.query<{ state: string }>("SELECT state FROM reclaim_transactions WHERE token_digest=$1", [digestToken(transaction)])).rows[0]?.state).toBe("COMPLETED");
     expect((await db.client.query("SELECT id FROM audit_events WHERE subject_id=$1 AND type='AUTH_RECOVERY_COMPLETED'", [identity.user.id])).rows).toHaveLength(1);
 
@@ -504,37 +492,37 @@ describe("real authentication", { timeout: 60_000 }, () => {
   it("uses generic recovery failures and rejects cross-account, cross-application, replayed, expired and cancelled transactions", async () => {
     const identity = await account();
     const codes = identity.recoveryCodes;
-    const started = await request("/reclaim/start", { email: identity.email });
+    const started = await request("/reclaim/start", { accountId: identity.user.id });
     const transaction = started.json().transaction as string;
-    const invalid = await request("/reclaim/verify", { email: identity.email, transaction, recoveryCode: secret().slice(0, 32) });
-    const mismatched = await request("/reclaim/verify", { email: `${secret()}@synthetic.test`, transaction, recoveryCode: codes[0] });
+    const invalid = await request("/reclaim/verify", { accountId: identity.user.id, transaction, recoveryCode: secret().slice(0, 32) });
+    const mismatched = await request("/reclaim/verify", { accountId: secret(), transaction, recoveryCode: codes[0] });
     expect(invalid.statusCode).toBe(401);
     expect(mismatched.statusCode).toBe(401);
     expect({ code: invalid.json().error.code, message: invalid.json().error.message }).toEqual({ code: mismatched.json().error.code, message: mismatched.json().error.message });
-    expect((await request("/reclaim/verify", { email: identity.email, transaction, recoveryCode: codes[0] }, undefined, key2)).statusCode).toBe(401);
-    expect((await request("/reclaim/verify", { email: identity.email, transaction, recoveryCode: codes[0] })).statusCode).toBe(200);
-    expect((await request("/reclaim/verify", { email: identity.email, transaction, recoveryCode: codes[0] })).statusCode).toBe(401);
+    expect((await request("/reclaim/verify", { accountId: identity.user.id, transaction, recoveryCode: codes[0] }, undefined, key2)).statusCode).toBe(401);
+    expect((await request("/reclaim/verify", { accountId: identity.user.id, transaction, recoveryCode: codes[0] })).statusCode).toBe(200);
+    expect((await request("/reclaim/verify", { accountId: identity.user.id, transaction, recoveryCode: codes[0] })).statusCode).toBe(401);
 
-    const expired = await request("/reclaim/start", { email: identity.email });
+    const expired = await request("/reclaim/start", { accountId: identity.user.id });
     const expiredTransaction = expired.json().transaction as string;
     await db.client.query("UPDATE reclaim_transactions SET created_at=now()-interval '2 hours',expires_at=now()-interval '1 second' WHERE token_digest=$1", [digestToken(expiredTransaction)]);
-    expect((await request("/reclaim/verify", { email: identity.email, transaction: expiredTransaction, recoveryCode: codes[1] })).statusCode).toBe(401);
+    expect((await request("/reclaim/verify", { accountId: identity.user.id, transaction: expiredTransaction, recoveryCode: codes[1] })).statusCode).toBe(401);
     expect((await db.client.query<{ state: string }>("SELECT state FROM reclaim_transactions WHERE token_digest=$1", [digestToken(expiredTransaction)])).rows[0]?.state).toBe("EXPIRED");
 
-    const cancelled = await request("/reclaim/start", { email: identity.email });
+    const cancelled = await request("/reclaim/start", { accountId: identity.user.id });
     const cancelledTransaction = cancelled.json().transaction as string;
     expect((await request("/reclaim/cancel", { transaction: cancelledTransaction })).statusCode).toBe(200);
-    expect((await request("/reclaim/verify", { email: identity.email, transaction: cancelledTransaction, recoveryCode: codes[1] })).statusCode).toBe(401);
+    expect((await request("/reclaim/verify", { accountId: identity.user.id, transaction: cancelledTransaction, recoveryCode: codes[1] })).statusCode).toBe(401);
     expect((await db.client.query<{ state: string }>("SELECT state FROM reclaim_transactions WHERE token_digest=$1", [digestToken(cancelledTransaction)])).rows[0]?.state).toBe("CANCELLED");
   });
   it("consumes recovery codes and passkey replacement ceremonies exactly once", async () => {
     const identity = await account();
     const codes = identity.recoveryCodes;
-    const started = await request("/reclaim/start", { email: identity.email });
+    const started = await request("/reclaim/start", { accountId: identity.user.id });
     const transaction = started.json().transaction as string;
     const results = await Promise.all([
-      request("/reclaim/verify", { email: identity.email, transaction, recoveryCode: codes[0] }),
-      request("/reclaim/verify", { email: identity.email, transaction, recoveryCode: codes[0] }),
+      request("/reclaim/verify", { accountId: identity.user.id, transaction, recoveryCode: codes[0] }),
+      request("/reclaim/verify", { accountId: identity.user.id, transaction, recoveryCode: codes[0] }),
     ]);
     expect(results.map((result: { statusCode: number }) => result.statusCode).sort()).toEqual([200, 401]);
     const options = await request("/reclaim/passkey/options", { transaction, origin });
@@ -555,7 +543,7 @@ describe("real authentication", { timeout: 60_000 }, () => {
     expect(String(response.headers["set-cookie"])).toContain("Max-Age=0");
     expect((await request("/session", undefined, identity.token)).statusCode).toBe(401);
     expect((await request("/session", undefined, other.token)).statusCode).toBe(200);
-    const loginOptions = await request("/webauthn/login/options", { origin, email: identity.email });
+    const loginOptions = await request("/webauthn/login/options", { origin, accountId: identity.user.id });
     expect((await request("/webauthn/login/verify", { challengeId: loginOptions.json().challengeId,
       response: identity.authenticator.assertion(loginOptions.json().options.challenge, identity.user.id, { counter: 2 }) })).statusCode).toBe(401);
     expect((await db.client.query("SELECT id FROM webauthn_credentials WHERE user_id=$1", [identity.user.id])).rows).toHaveLength(0);

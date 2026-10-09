@@ -10,9 +10,9 @@ export async function POST(request: NextRequest) {
   const rejected = requireSameOrigin(request, integration);
   if (rejected) return rejected;
   const token = request.cookies.get(pendingRegistrationCookie)?.value;
-  if (!token) return NextResponse.json({ error: "Verify your email before creating a passkey." }, { status: 401 });
+  if (!token) return NextResponse.json({ error: "Start a new account registration before creating a passkey." }, { status: 401 });
   const account = await integration.storage.getPendingRegistration(token);
-  if (!account || !await integration.storage.canRegisterFirstPasskey(account.id)) return NextResponse.json({ error: "The registration has expired. Verify your email again." }, { status: 401 });
+  if (!account) return NextResponse.json({ error: "The registration has expired. Start again." }, { status: 401 });
   let body: unknown;
   try { body = await request.json(); } catch { return NextResponse.json({ error: "The passkey response could not be verified." }, { status: 400 }); }
   if (!body || typeof body !== "object") {
@@ -21,7 +21,7 @@ export async function POST(request: NextRequest) {
   const input = body as Record<string, unknown>;
   if (typeof input.challengeId !== "string" || !("response" in input)) return NextResponse.json({ error: "The passkey response could not be verified." }, { status: 400 });
   try {
-    await integration.passkeys.registrationVerify({ account, challengeId: input.challengeId, response: input.response as RegistrationResponseJSON });
+    await integration.passkeys.registrationVerify({ account, registrationContext: token, challengeId: input.challengeId, response: input.response as RegistrationResponseJSON });
     const response = NextResponse.json({ message: "Passkey created. Your account is ready." });
     clearTransactionCookie(response, pendingRegistrationCookie, integration);
     return response;

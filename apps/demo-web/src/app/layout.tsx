@@ -4,6 +4,7 @@ import "@sentriq/access/components.css";
 import "@sentriq/access/tokens.css";
 import "./globals.css";
 import { NorthstarProviders } from "@/components/northstar-providers";
+import { RecoveryAssistant } from "@/components/recovery-assistant";
 import { SiteHeader } from "@/components/site-header";
 
 export const metadata: Metadata = {
@@ -22,6 +23,7 @@ export default function RootLayout({ children }: Readonly<{ children: ReactNode 
           <a className="skip-link" href="#main-content">Skip to main content</a>
           <SiteHeader />
           {children}
+          <RecoveryAssistant />
           <footer className="site-footer">
             <div className="page-container footer-inner">
               <span>Northstar Workspace</span>

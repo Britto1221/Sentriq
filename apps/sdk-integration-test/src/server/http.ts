@@ -29,7 +29,7 @@ export async function authenticatedAccount(request: NextRequest, runtime: Integr
   const session = await runtime.storage.getSessionByToken(token);
   if (!session || session.status !== "active") return null;
   const account = await runtime.storage.getAccountById(session.userId);
-  return account?.active && account.emailVerified ? { account, token } : null;
+  return account?.active ? { account, token } : null;
 }
 
 export function badInput(): NextResponse {

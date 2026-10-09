@@ -11,6 +11,9 @@ const apiTestEnvironment: Record<string, string> = {
 export default defineConfig({
   testDir: "./e2e",
   fullyParallel: true,
+  // The E2E flows share one local API/database and CDP virtual authenticators.
+  // Serial execution keeps their security state isolated and timing predictable.
+  workers: 1,
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? "github" : "list",

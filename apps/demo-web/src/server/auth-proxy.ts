@@ -3,10 +3,8 @@ import { deviceLinkRequestSummarySchema, passkeySummarySchema, securityEventSche
 
 const maxBodyBytes = 16 * 1024;
 const timeoutMs = 5_000;
-const routeTable: Record<string, { method: "GET" | "POST"; needsSession: boolean; issuesCookie?: "login" | "clear"; injectOrigin?: true | "transaction" | "login-email" | "device-link"; injectReclaim?: "verify-code" | "options" | "verify-passkey" | "cancel"; internalOnly?: boolean; needsEnrollment?: boolean; issuesEnrollment?: boolean; clearEnrollment?: boolean; needsDeviceLink?: boolean; issuesDeviceLink?: boolean; clearDeviceLink?: boolean; needsReclaim?: boolean; issuesReclaim?: boolean; clearReclaim?: boolean }> = {
-  "registration/start": { method: "POST", needsSession: false },
-  "registration/verify": { method: "POST", needsSession: false, issuesEnrollment: true },
-  "dev/email-inbox": { method: "POST", needsSession: false },
+const routeTable: Record<string, { method: "GET" | "POST"; needsSession: boolean; issuesCookie?: "login" | "clear"; injectOrigin?: true | "transaction" | "login-account" | "device-link"; injectReclaim?: "verify-code" | "options" | "verify-passkey" | "cancel"; internalOnly?: boolean; needsEnrollment?: boolean; issuesEnrollment?: boolean; clearEnrollment?: boolean; needsDeviceLink?: boolean; issuesDeviceLink?: boolean; clearDeviceLink?: boolean; needsReclaim?: boolean; issuesReclaim?: boolean; clearReclaim?: boolean }> = {
+  "registration/start": { method: "POST", needsSession: false, issuesEnrollment: true },
   session: { method: "GET", needsSession: true },
   sessions: { method: "GET", needsSession: true },
   credentials: { method: "GET", needsSession: true },
@@ -18,7 +16,7 @@ const routeTable: Record<string, { method: "GET" | "POST"; needsSession: boolean
   logout: { method: "POST", needsSession: true, issuesCookie: "clear" },
   "webauthn/register/options": { method: "POST", needsSession: false, needsEnrollment: true, injectOrigin: true },
   "webauthn/register/verify": { method: "POST", needsSession: false, needsEnrollment: true, issuesCookie: "login", clearEnrollment: true },
-  "webauthn/login/options": { method: "POST", needsSession: false, injectOrigin: "login-email" },
+  "webauthn/login/options": { method: "POST", needsSession: false, injectOrigin: "login-account" },
   "webauthn/login/verify": { method: "POST", needsSession: false, issuesCookie: "login" },
   "reclaim/start": { method: "POST", needsSession: false, issuesReclaim: true },
   "reclaim/verify": { method: "POST", needsSession: false, needsReclaim: true, injectReclaim: "verify-code" },
@@ -199,7 +197,10 @@ async function handleAuthProxyImpl(
     let parsed: unknown;
     try { parsed = JSON.parse(raw); } catch { return failure(400, "INVALID_REQUEST", "The request could not be completed.", correlationId); }
     if (!isJsonObject(parsed)) return failure(400, "INVALID_REQUEST", "The request could not be completed.", correlationId);
-    if (route.injectOrigin === true) {
+    if (segments.join("/") === "registration/start") {
+      if (Object.keys(parsed).some((key) => !["displayName", "email"].includes(key)) || typeof parsed.displayName !== "string" || parsed.displayName.length > 100 || (parsed.email !== undefined && (typeof parsed.email !== "string" || parsed.email.length > 254))) return failure(400, "INVALID_REQUEST", "The request could not be completed.", correlationId);
+      parsed = { displayName: parsed.displayName, ...(typeof parsed.email === "string" ? { email: parsed.email } : {}) };
+    } else if (route.injectOrigin === true) {
       if (Object.keys(parsed).length !== 0) return failure(400, "INVALID_REQUEST", "The request could not be completed.", correlationId);
       parsed = { origin: config.origin };
     } else if (route.injectOrigin === "transaction") {
@@ -207,23 +208,23 @@ async function handleAuthProxyImpl(
         return failure(400, "INVALID_REQUEST", "The request could not be completed.", correlationId);
       }
       parsed = { transaction: parsed.transaction, origin: config.origin };
-    } else if (route.injectOrigin === "login-email") {
-      if (Object.keys(parsed).some((key) => key !== "email") || (parsed.email !== undefined && (typeof parsed.email !== "string" || parsed.email.length > 254))) {
+    } else if (route.injectOrigin === "login-account") {
+      if (Object.keys(parsed).some((key) => key !== "accountId") || (parsed.accountId !== undefined && (typeof parsed.accountId !== "string" || parsed.accountId.length > 64))) {
         return failure(400, "INVALID_REQUEST", "The request could not be completed.", correlationId);
       }
-      parsed = { origin: config.origin, ...(typeof parsed.email === "string" ? { email: parsed.email } : {}) };
+      parsed = { origin: config.origin, ...(typeof parsed.accountId === "string" ? { accountId: parsed.accountId } : {}) };
     } else if (route.injectOrigin === "device-link") {
       if (Object.keys(parsed).length !== 1 || typeof parsed.requestId !== "string" || !/^[0-9a-f-]{36}$/i.test(parsed.requestId)) {
         return failure(400, "INVALID_REQUEST", "The request could not be completed.", correlationId);
       }
       parsed = { requestId: parsed.requestId, origin: config.origin };
     } else if (route.injectReclaim === "verify-code") {
-      if (Object.keys(parsed).some((key) => key !== "email" && key !== "recoveryCode")
-        || typeof parsed.email !== "string" || parsed.email.length > 254
+      if (Object.keys(parsed).some((key) => key !== "accountId" && key !== "recoveryCode")
+        || typeof parsed.accountId !== "string" || parsed.accountId.length > 64
         || typeof parsed.recoveryCode !== "string" || !/^[A-Za-z0-9_-]{32}$/.test(parsed.recoveryCode)) {
         return failure(400, "INVALID_REQUEST", "The request could not be completed.", correlationId);
       }
-      parsed = { email: parsed.email, recoveryCode: parsed.recoveryCode, transaction: reclaimToken };
+      parsed = { accountId: parsed.accountId, recoveryCode: parsed.recoveryCode, transaction: reclaimToken };
     } else if (route.injectReclaim === "options") {
       if (Object.keys(parsed).length !== 0) return failure(400, "INVALID_REQUEST", "The request could not be completed.", correlationId);
       parsed = { transaction: reclaimToken, origin: config.origin };

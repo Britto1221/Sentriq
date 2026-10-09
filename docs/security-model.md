@@ -19,7 +19,7 @@
 - Removing a passkey uses a grant scoped to that credential's resource. Grant consumption and credential removal share a database transaction; a row lock prevents concurrent removals from deleting the final passkey.
 - Northstar server routes check same-origin mutation requests, use HttpOnly/SameSite cookies, no-store responses, bounded JSON bodies and generic auth failures.
 - Audit events omit passwords, recovery code plaintext, opaque session tokens, challenges, signatures and key material.
-- The recovery guide does not make network requests. It does not validate a code or trigger any auth state transition.
+- Sentriq Assistant is informational. The browser rejects code- or credential-shaped chat messages before sending them, the server repeats the check, and the OpenAI adapter receives only bounded/redacted user text plus page/language context. It does not receive account/session records, cookies, passkey material, or auth headers; it has no tools and cannot validate a code or trigger an auth state transition. Offline mode is available when configured or selected.
 
 ## Explicit limitations
 
@@ -34,4 +34,4 @@
 
 ## Excluded signals and authorities
 
-No browser/device fingerprint, keystroke biometrics, geolocation, VPN/Tor intelligence, machine-learning score or IP change is used as proof of identity. The deterministic recovery guide is not an AI model. No model may grant a session, approve a recovery, authorize an action, or override a security decision.
+No browser/device fingerprint, keystroke biometrics, geolocation, VPN/Tor intelligence, machine-learning score or IP change is used as proof of identity. Sentriq Assistant may use OpenAI for plain-language guidance, with deterministic English/Tamil fallback. No model may grant a session, approve a recovery, authorize an action, or override a security decision. Model text remains untrusted and is displayed as plain text.

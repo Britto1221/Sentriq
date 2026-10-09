@@ -1,6 +1,8 @@
+> **Sentriq — Under Implementation.** This open-source authentication SDK is actively being developed and is not production-ready. Email delivery is not part of Sentriq; host applications own account identity and optional email attributes.
+
 # Sentriq
 
-Sentriq is a self-hostable TypeScript authentication security project. Its Northstar reference app demonstrates verified-email registration, passwordless WebAuthn passkeys, one-use recovery codes, server-enforced fresh verification for protected actions, QR-free device linking, and English/Tamil guidance.
+Sentriq is a self-hostable TypeScript authentication security project. Its Northstar reference app demonstrates host-owned registration (email is optional profile data), passwordless WebAuthn passkeys, one-use recovery codes, server-enforced fresh verification for protected actions, QR-free device linking, and English/Tamil guidance.
 
 **Maturity:** local reference implementation, not a hosted authentication service or production-certified product. The current `@sentriq/sdk` is a typed server-side client for the self-hosted Sentriq API; a framework-independent host-storage adapter is not complete. Read [the audit](docs/repository-audit.md) and [security model](docs/security-model.md) before adapting it for another application.
 
@@ -21,7 +23,7 @@ Sentriq is a self-hostable TypeScript authentication security project. Its North
 - pnpm 12.10.1.
 - Chromium installed by Playwright for browser tests.
 
-No paid email, AI, cloud, or voice service is required for local development. Localhost is accepted for WebAuthn development; deployable WebAuthn origins must use HTTPS.
+No paid email, AI, cloud, or voice service is required for local development. Northstar's Sentriq Assistant uses deterministic guidance whenever OpenAI is not configured; server-side OpenAI guidance is optional. Localhost is accepted for WebAuthn development; deployable WebAuthn origins must use HTTPS.
 
 ## Local setup
 
@@ -47,9 +49,11 @@ Start the API and Northstar:
 pnpm dev
 ```
 
-Open [http://localhost:3001](http://localhost:3001). New accounts enter an email, request a verification code, then use the clearly labeled development inbox control to retrieve the local code. That control is unavailable in production. A production deployment must inject an `EmailSender` and a real verified delivery channel; without one, registration fails closed with `EMAIL_UNAVAILABLE`.
+Open [http://localhost:3001](http://localhost:3001). Northstar creates an application-owned account ID and a short-lived, one-use passkey enrollment grant. Email is optional profile data and never authorizes enrollment or recovery. Sentriq is under implementation; do not use it as a production authentication service yet.
 
 The local API uses a persistent PGlite directory at `.data/security-api`. The service currently expects one API process to own that directory. Back it up before manual cleanup; do not point production at an ephemeral or shared multi-writer directory.
+
+To enable model-backed Sentriq Assistant guidance, configure `OPENAI_API_KEY`, `OPENAI_MODEL=gpt-6-luna`, and optionally `OPENAI_MAX_OUTPUT_TOKENS` in the server environment. The configured key must have access to the preferred model; the server checks model availability before inference and falls back to offline guidance when unavailable. Never place the key in a `NEXT_PUBLIC_` variable or client code. See [Sentriq Assistant](docs/ai-recovery-assistant.md) for privacy, timeouts, rate limits, and offline-mode details.
 
 ## Verification
 
@@ -60,7 +64,7 @@ pnpm build
 pnpm test:e2e
 ```
 
-The Playwright virtual authenticator exercises actual browser ceremony wiring and server verification, but it is not physical-device validation. Automated axe checks and keyboard tests are not a complete WCAG audit. No real phone/security-key matrix, native screen-reader pass, external penetration test, or production email delivery is claimed.
+The Playwright virtual authenticator exercises actual browser ceremony wiring and server verification, but it is not physical-device validation. Automated axe checks and keyboard tests are not a complete WCAG audit. No real phone/security-key matrix, native screen-reader pass, or external penetration test is claimed.
 
 ## SDK use
 
@@ -80,6 +84,7 @@ Use `@sentriq/sdk` only from trusted server routes. Keep the application key ser
 - [SDK integration](docs/sdk-integration.md)
 - [Hackathon demo](docs/hackathon-demo.md)
 - [Viva questions](docs/viva-questions.md)
+- [Railway deployment configuration](apps/security-api/README.md#single-application-production-bootstrap)
 
 ## Open-source notes and limitations
 

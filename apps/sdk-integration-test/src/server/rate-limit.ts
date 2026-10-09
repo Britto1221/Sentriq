@@ -4,8 +4,8 @@ const globalLimits = globalThis as typeof globalThis & { __sentriqIntegrationLim
 const attempts = globalLimits.__sentriqIntegrationLimits ??= new Map<string, number[]>();
 
 /** Process-local demo limiter; production hosts should supply shared persistent rate-limit state. */
-export function allowEmailRequest(email: string, now = Date.now()): boolean {
-  return allowKey("email", email, 5, 60 * 60_000, now);
+export function allowSignupRequest(source: string, now = Date.now()): boolean {
+  return allowKey("signup", source, 10, 60 * 60_000, now);
 }
 
 export function allowLoginAttempt(now = Date.now()): boolean {

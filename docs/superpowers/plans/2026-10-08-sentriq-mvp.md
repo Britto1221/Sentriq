@@ -1,6 +1,6 @@
 # Sentriq Autonomous MVP Implementation Plan
 
-> **Superseded:** This earlier plan included password authentication, OpenAI investigation, and Console work. The current focus is passwordless email verification + passkeys, Shield, Reclaim, Device Link, Access, and Northstar. Follow current product documentation instead of the historical checklist below.
+> **Superseded:** This earlier plan included password authentication, OpenAI investigation, and Console work. The current focus is host-owned, email-optional identity with passwordless passkeys, Shield, Reclaim, Device Link, Access, and Northstar. Follow current product documentation instead of the historical checklist below.
 
 > This plan supersedes the Stage A-only stopping point. Continue automatically through frontend, backend, tests, documentation, local commits and a safe non-forced push. Use the existing approved two-app pnpm architecture.
 

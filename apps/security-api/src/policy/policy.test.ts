@@ -18,14 +18,10 @@ function input(actionId = "data.export") { return { applicationId: "policy-app",
 async function evaluated(actionId = "data.export") { return post("/v1/evaluations", input(actionId)); }
 async function enrollment() {
   if (registeredAuthenticator) return registeredAuthenticator;
-  const email = (await db.client.query<{ email: string }>("SELECT email FROM users WHERE id=$1", [user])).rows[0]!.email;
-  expect((await post("/v1/auth/registration/start", { email }, "")).statusCode).toBe(200);
-  const inbox = await post("/v1/auth/dev/email-inbox", { email }, "");
-  expect(inbox.statusCode).toBe(200);
-  const verified = await post("/v1/auth/registration/verify", { email, code: inbox.json().verificationCode }, "");
-  expect(verified.statusCode).toBe(200);
+  const enrollmentToken = opaque();
+  await db.client.query("INSERT INTO passkey_enrollment_transactions(id,tenant_id,application_id,user_id,token_digest,expires_at) VALUES ($1,'policy-tenant','policy-app',$2,$3,now()+interval '10 minutes')", [randomUUID(), user, digestToken(enrollmentToken)]);
   const auth = new TestAuthenticator();
-  const headers = { "x-sentriq-api-key": key, "x-sentriq-registration-token": verified.json().registrationToken as string };
+  const headers = { "x-sentriq-api-key": key, "x-sentriq-registration-token": enrollmentToken };
   const options = await app.inject({ method: "POST", url: "/v1/auth/webauthn/register/options", headers, payload: { origin } });
   expect(options.statusCode, options.body).toBe(200);
   const completed = await app.inject({ method: "POST", url: "/v1/auth/webauthn/register/verify", headers, payload: {

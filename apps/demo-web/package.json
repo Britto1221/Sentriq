@@ -12,9 +12,10 @@
   "dependencies": {
     "@sentriq/access": "workspace:*",
     "@sentriq/browser": "workspace:*",
-    "@sentriq/shared": "workspace:*",
     "@sentriq/sdk": "workspace:*",
+    "@sentriq/shared": "workspace:*",
     "next": "16.4.0",
+    "openai": "7.30.1",
     "react": "19.3.0",
     "react-dom": "19.3.0"
   },

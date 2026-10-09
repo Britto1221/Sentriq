@@ -4,6 +4,7 @@ dist/
 coverage/
 .vitest/
 .artifacts/
+.tmp-test/
 .data/
 playwright-report/
 test-results/

@@ -16,8 +16,8 @@
 14. **Can one Shield grant be reused?** No. It is short-lived, action/resource/user/session scoped and atomically consumed.
 15. **Can a recovery code approve a Shield action?** No. Reclaim proof and Shield passkey proof are separate authorities.
 16. **Why provide multilingual guidance?** Security instructions only help when the user can understand them. English and Tamil catalog entries are deterministic; Tamil still needs native-speaker security review.
-17. **How is the recovery guide different from browser translation?** It selects fixed, reviewed-in-code English/Tamil messages for a small set of recovery intents; it does not translate arbitrary host content or send text to a model.
-18. **Does the guide use an AI model?** No. It is explicitly labeled deterministic, and no model/provider is connected. It cannot accept codes, verify identity or authorize recovery.
+17. **How is Sentriq Assistant different from browser translation?** It answers authentication and recovery questions in English or Tamil using the selected language, page context, and either bounded model-generated explanations or deterministic fallback guidance; it does not translate arbitrary host content.
+18. **Can the assistant approve login or recovery?** No. It has no security tools or account lookup. The backend verifies passkeys, consumes recovery codes, creates sessions, and authorizes sensitive actions independently.
 19. **What attacks does this demo mitigate?** It checks challenge replay, wrong-origin/RP assertions, session revocation, owner mismatch, missing/replayed step-up grants and reused recovery codes in tested paths.
 20. **What attacks does it not prevent?** It cannot prevent endpoint malware, authenticator compromise, stolen unused recovery codes, host application authorization bugs, database/operator compromise or every phishing scenario.
 21. **Why is Sentriq an SDK rather than an authenticator app?** It is intended to give host applications server verification and UI integration pieces; the user's device/credential manager supplies the authenticator. Current storage-agnostic SDK work remains incomplete.

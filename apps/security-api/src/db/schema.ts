@@ -22,10 +22,9 @@ export const applicationApiKeys = pgTable("application_api_keys", {
 }, (t) => [appReference(t), check("api_key_digest_format", sql`${t.digest} ~ '^[a-f0-9]{64}$'`)]);
 
 export const users = pgTable("users", {
-  id: text("id").primaryKey(), ...scope(), email: text("email").notNull(), displayName: text("display_name").notNull(),
+  id: text("id").primaryKey(), ...scope(), email: text("email"), displayName: text("display_name").notNull(),
   role: text("role").$type<"user" | "developer" | "admin">().notNull().default("user"), createdAt: created(), deletedAt: time("deleted_at"),
   passkeyEnrollmentRequired: boolean("passkey_enrollment_required").notNull().default(false),
-  emailVerifiedAt: time("email_verified_at"),
 }, (t) => [appReference(t), unique().on(t.tenantId, t.applicationId, t.id), unique().on(t.tenantId, t.applicationId, t.email),
   check("email_normalized", sql`${t.email} = lower(trim(${t.email})) AND length(${t.email}) BETWEEN 3 AND 254`),
   check("display_name_length", sql`length(${t.displayName}) BETWEEN 1 AND 100`), check("user_role", sql`${t.role} IN ('user','developer','admin')`)]);
@@ -78,26 +77,18 @@ export const webauthnChallenges = pgTable("webauthn_challenges", {
   check("challenge_action_resource", sql`(${t.actionId} IS NULL) = (${t.resourceId} IS NULL)`),
   index("challenges_expiry_idx").on(t.expiresAt).where(sql`${t.consumedAt} IS NULL`)]);
 
-export const emailVerificationTransactions = pgTable("email_verification_transactions", {
-  id: text("id").primaryKey(), ...scope(), userId: text("user_id"), email: text("email").notNull(), accountDigest: text("account_digest").notNull(),
-  verificationDigest: text("verification_digest").notNull(), registrationDigest: text("registration_digest").notNull().unique(),
-  state: text("state").$type<"PENDING" | "VERIFIED" | "COMPLETED" | "EXPIRED" | "CANCELLED">().notNull().default("PENDING"),
-  failedAttempts: integer("failed_attempts").notNull().default(0), createdAt: created(), expiresAt: time("expires_at").notNull(),
-  verifiedAt: time("verified_at"), completedAt: time("completed_at"),
-}, (t) => [appReference(t), userReference(t),
-  check("email_verification_email", sql`${t.email} = lower(trim(${t.email})) AND length(${t.email}) BETWEEN 3 AND 254`),
-  check("email_verification_account_digest", sql`${t.accountDigest} ~ '^[a-f0-9]{64}$'`),
-  check("email_verification_code_digest", sql`${t.verificationDigest} ~ '^[a-f0-9]{64}$'`),
-  check("email_verification_registration_digest", sql`${t.registrationDigest} ~ '^[a-f0-9]{64}$'`),
-  check("email_verification_state", sql`${t.state} IN ('PENDING','VERIFIED','COMPLETED','EXPIRED','CANCELLED')`),
-  check("email_verification_attempts", sql`${t.failedAttempts} BETWEEN 0 AND 5`),
-  check("email_verification_expiry", sql`${t.expiresAt} > ${t.createdAt}`),
-  check("email_verification_verified", sql`(${t.state} IN ('VERIFIED','COMPLETED')) = (${t.verifiedAt} IS NOT NULL)`),
-  check("email_verification_completed", sql`(${t.state} = 'COMPLETED') = (${t.completedAt} IS NOT NULL)`),
-  index("email_verification_expiry_idx").on(t.expiresAt).where(sql`${t.state} IN ('PENDING','VERIFIED')`)]);
+export const passkeyEnrollmentTransactions = pgTable("passkey_enrollment_transactions", {
+  id: text("id").primaryKey(), ...scope(), userId: text("user_id").notNull(), tokenDigest: text("token_digest").notNull().unique(),
+  state: text("state").$type<"PENDING" | "COMPLETED" | "EXPIRED" | "CANCELLED">().notNull().default("PENDING"),
+  createdAt: created(), expiresAt: time("expires_at").notNull(), completedAt: time("completed_at"),
+}, (t) => [appReference(t), userReference(t), check("passkey_enrollment_digest", sql`${t.tokenDigest} ~ '^[a-f0-9]{64}$'`),
+  check("passkey_enrollment_state", sql`${t.state} IN ('PENDING','COMPLETED','EXPIRED','CANCELLED')`),
+  check("passkey_enrollment_expiry", sql`${t.expiresAt} > ${t.createdAt}`),
+  check("passkey_enrollment_completed", sql`(${t.state}='COMPLETED') = (${t.completedAt} IS NOT NULL)`),
+  index("passkey_enrollment_expiry_idx").on(t.expiresAt).where(sql`${t.state}='PENDING'`)]);
 
 export const deviceLinkRequests = pgTable("device_link_requests", {
-  id: text("id").primaryKey(), ...scope(), userId: text("user_id"), emailDigest: text("email_digest").notNull(), tokenDigest: text("token_digest").notNull().unique(),
+  id: text("id").primaryKey(), ...scope(), userId: text("user_id"), accountDigest: text("account_digest").notNull(), tokenDigest: text("token_digest").notNull().unique(),
   comparisonCode: text("comparison_code").notNull(), state: text("state").$type<"PENDING" | "APPROVED" | "REJECTED" | "COMPLETED" | "EXPIRED" | "CANCELLED">().notNull().default("PENDING"),
   createdAt: created(), expiresAt: time("expires_at").notNull(), approvedAt: time("approved_at"), approvalSessionId: text("approval_session_id"),
   approvalChallengeId: text("approval_challenge_id"), approvalChallenge: text("approval_challenge"), approvalExpectedOrigin: text("approval_expected_origin"),
@@ -106,7 +97,7 @@ export const deviceLinkRequests = pgTable("device_link_requests", {
   registrationExpiresAt: time("registration_expires_at"), completedAt: time("completed_at"),
 }, (t) => [appReference(t), userReference(t),
   foreignKey({ columns: [t.tenantId, t.applicationId, t.userId, t.approvalSessionId], foreignColumns: [sessions.tenantId, sessions.applicationId, sessions.userId, sessions.id] }),
-  check("device_link_email_digest", sql`${t.emailDigest} ~ '^[a-f0-9]{64}$'`), check("device_link_token_digest", sql`${t.tokenDigest} ~ '^[a-f0-9]{64}$'`),
+  check("device_link_account_digest", sql`${t.accountDigest} ~ '^[a-f0-9]{64}$'`), check("device_link_token_digest", sql`${t.tokenDigest} ~ '^[a-f0-9]{64}$'`),
   check("device_link_comparison_code", sql`${t.comparisonCode} ~ '^[A-Z2-9]{6}$'`),
   check("device_link_state", sql`${t.state} IN ('PENDING','APPROVED','REJECTED','COMPLETED','EXPIRED','CANCELLED')`),
   check("device_link_expiry", sql`${t.expiresAt} > ${t.createdAt}`),

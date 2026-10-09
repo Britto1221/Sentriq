@@ -32,7 +32,7 @@ async function createRuntime(): Promise<IntegrationRuntime> {
   const config = configuration();
   const configuredDir = process.env.SENTRIQ_DATA_DIR;
   if (!configuredDir && process.env.NODE_ENV !== "development") throw new Error("SENTRIQ_DATA_DIR must be configured outside local development.");
-  const dataDir = path.resolve(process.cwd(), configuredDir ?? ".data/sdk-integration-test");
+  const dataDir = path.resolve(/* turbopackIgnore: true */ process.cwd(), configuredDir ?? ".data/sdk-integration-test");
   const database = new PGlite(dataDir);
   await database.waitReady;
   const storage = new IndependentHostStorage(database);

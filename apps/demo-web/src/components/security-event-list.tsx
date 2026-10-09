@@ -2,9 +2,6 @@ import type { SecurityEvent } from "@sentriq/shared";
 
 const titles: Partial<Record<SecurityEvent["type"], string>> = {
   AUTH_REGISTRATION_COMPLETED: "Account registered",
-  AUTH_EMAIL_VERIFICATION_SENT: "Email verification requested",
-  AUTH_EMAIL_VERIFICATION_COMPLETED: "Email verified",
-  AUTH_EMAIL_VERIFICATION_FAILED: "Email verification failed",
   AUTH_LOGIN_SUCCEEDED: "Sign-in succeeded",
   AUTH_LOGIN_FAILED: "Sign-in failed",
   AUTH_STEP_UP_REQUIRED: "Fresh verification required",

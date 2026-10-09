@@ -112,10 +112,10 @@ export type StepUpOptionsResult = z.infer<typeof stepUpOptionsResultSchema>;
 export type StepUpVerifyResult = z.infer<typeof stepUpVerifyResultSchema>;
 
 export const reclaimTransactionTokenSchema = z.string().regex(/^[A-Za-z0-9_-]{43}$/);
-export const reclaimStartInputSchema = z.object({ email: z.email().trim().toLowerCase().max(254) }).strict();
+export const reclaimStartInputSchema = z.object({ accountId: opaqueIdSchema }).strict();
 export const reclaimStartResultSchema = z.object({ status: z.literal("accepted"), transaction: reclaimTransactionTokenSchema, expiresIn: z.literal(600) }).strict();
 export const reclaimVerifyInputSchema = z.object({
-  email: z.email().trim().toLowerCase().max(254),
+  accountId: opaqueIdSchema,
   transaction: reclaimTransactionTokenSchema,
   recoveryCode: z.string().regex(/^[A-Za-z0-9_-]{32}$/),
 }).strict();
@@ -233,7 +233,7 @@ export type StepUpChallenge = z.infer<typeof stepUpChallengeSchema>;
 
 export const userSummarySchema = z.object({
   id: opaqueIdSchema,
-  email: z.email().max(254),
+  email: z.email().max(254).nullable().optional(),
   displayName: z.string().trim().min(1).max(100),
   role: z.enum(["user", "developer", "admin"]),
   applicationId: opaqueIdSchema,

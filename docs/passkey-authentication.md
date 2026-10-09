@@ -2,19 +2,19 @@
 
 Northstar uses `@simplewebauthn/browser` for browser WebAuthn ceremonies and `@simplewebauthn/server` for relying-party verification. The authenticator or passkey provider protects the private key. Sentriq stores only the credential ID, public key, counter, transport/device metadata and account association. Biometric information is never sent to Sentriq.
 
-## Email registration
+## Host-controlled registration
 
-1. The user enters an email address. Sentriq normalizes it and sends a short-lived verification code using the configured `EmailSender`.
-2. The user submits the code. Only after server-side verification does Sentriq create or activate the account and issue a short-lived registration transaction in an HttpOnly same-site cookie through Northstar's BFF.
+1. The host application creates or loads the account through its trusted account-creation or authenticated-session flow. The stable host account ID is the Sentriq subject; optional email is profile data only.
+2. For a new account, the host issues a short-lived, one-use registration grant only after its own account-creation policy succeeds. An unauthenticated browser cannot register against an existing account by supplying its ID or email.
 3. The browser requests passkey creation options. The API binds a fresh, expiring challenge to that verified account and the registered application origin/RP ID.
 4. The browser calls WebAuthn. Sentriq verifies the challenge, exact origin, RP ID, user-presence and user-verification requirements before inserting the unique credential.
-5. Only after verification does the API create the session and issue six independent recovery codes. Plaintext codes are returned once for the setup screen; storage contains salted verifiers.
+5. Only after verification does the host create or retain the authenticated session. The reference application issues six independent recovery codes once; storage contains protected verifiers.
 
-The local development API keeps verification codes in memory and exposes them only through the labeled development inbox route. The route is disabled in production. This repository does not contain a production email sender. The API fails closed with `EMAIL_UNAVAILABLE` when registration has no injected sender.
+Email delivery and email verification are not Sentriq features. The host application owns account identity; an optional email attribute is profile data only. New self-hosted accounts use a short-lived registration grant and must complete a server-verified passkey enrollment before a session is issued.
 
 ## Passwordless login
 
-The primary flow asks for email and then requests a discoverable passkey assertion. The email digest is bound to the short-lived challenge, but the options response does not reveal whether the account exists. A second button supports discoverable sign-in without email where the authenticator/browser can identify the credential. The server checks the challenge, origin, RP ID, signature, user verification, credential ownership and user handle before it creates a session. There is no password authentication route or password form.
+The reference flow asks for the host account ID and requests a discoverable passkey assertion; users can also start discoverable sign-in without an identifier where the authenticator/browser supports it. Email is optional and is not used as an authentication factor. The server checks the challenge, origin, RP ID, signature, user verification, credential ownership and user handle before the host creates a session. There is no password authentication route or password form.
 
 The server does not create a new key pair during login. Each separately registered credential has its own key pair. A platform provider may synchronize a passkey; Sentriq neither assumes each device has a distinct key nor implements key synchronization.
 

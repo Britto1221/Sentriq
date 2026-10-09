@@ -6,7 +6,6 @@ import { z } from "zod";
 import { digestToken, verifyDatabase, type Database } from "./db/index";
 import type { ApiConfig } from "./config";
 import { registerAuthRoutes } from "./auth/routes";
-import type { EmailSender } from "./auth/service";
 import { registerPolicyRoutes } from "./policy/routes";
 
 export interface ApplicationScope { tenantId: string; applicationId: string }
@@ -33,7 +32,7 @@ export async function authenticateApplication(database: Database, request: Fasti
   return row ? { tenantId: row.tenant_id, applicationId: row.application_id } : null;
 }
 
-export async function buildApp(options: { database: Database; config: ApiConfig; logStream?: Writable; emailSender?: EmailSender }) {
+export async function buildApp(options: { database: Database; config: ApiConfig; logStream?: Writable }) {
   const app = Fastify({
     trustProxy: false, requestIdHeader: false, genReqId: () => randomUUID(), bodyLimit: 16_384,
     logController: new LogController({ disableRequestLogging: true }),
@@ -84,7 +83,7 @@ export async function buildApp(options: { database: Database; config: ApiConfig;
     // Caller-supplied tenant/application query values are deliberately ignored.
     return z.object({ tenantId: z.string(), applicationId: z.string() }).parse(request.applicationScope);
   });
-  await registerAuthRoutes(app, options.database, options.config, options.emailSender);
+  await registerAuthRoutes(app, options.database, options.config);
   await registerPolicyRoutes(app, options.database, options.config);
   return app;
 }

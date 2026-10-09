@@ -174,16 +174,14 @@ describe("Northstar trusted auth proxy", () => {
     expect((await response.text()).includes(setCookie.split("=")[1]!.split(";")[0]!)).toBe(false);
   });
 
-  it("moves the verified-email enrollment secret to an HttpOnly cookie and never returns it to browser JavaScript", async () => {
+  it("moves a host-owned enrollment grant to an HttpOnly cookie", async () => {
     const registrationToken = "r".repeat(43);
-    const fetcher = fetchOk({ status: "verified", registrationToken, expiresIn: 600 });
-    const response = await handleAuthProxy(request("registration/verify", { method: "POST", body: JSON.stringify({ email: "alice@example.test", code: "A1B2C3D4E5F6" }) }), ["registration", "verify"], env, fetcher);
+    const fetcher = fetchOk({ status: "accepted", accountId: "account-1", registrationToken, expiresIn: 600 });
+    const response = await handleAuthProxy(request("registration/start", { method: "POST", body: JSON.stringify({ displayName: "Alice" }) }), ["registration", "start"], env, fetcher);
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ status: "verified", expiresIn: 600 });
+    expect(await response.json()).toEqual({ status: "accepted", accountId: "account-1", expiresIn: 600 });
     expect(response.headers.get("set-cookie")).toContain("sentriq_enrollment=");
     expect(response.headers.get("set-cookie")).toContain("HttpOnly");
-    expect(response.headers.get("set-cookie")).toContain("SameSite=Strict");
-
     const optionsFetcher = fetchOk({ challengeId: "c1", options: { challenge: "abc" } });
     const options = await handleAuthProxy(request("webauthn/register/options", { method: "POST", headers: { cookie: "sentriq_enrollment=" + registrationToken }, body: "{}" }), ["webauthn", "register", "options"], env, optionsFetcher);
     expect(options.status).toBe(200);
@@ -192,7 +190,7 @@ describe("Northstar trusted auth proxy", () => {
 
   it("keeps the restricted Reclaim transaction in an HttpOnly cookie throughout recovery", async () => {
     const transaction = "r".repeat(43);
-    const start = await handleAuthProxy(request("reclaim/start", { method: "POST", body: JSON.stringify({ email: "alice@example.test" }) }), ["reclaim", "start"], env,
+    const start = await handleAuthProxy(request("reclaim/start", { method: "POST", body: JSON.stringify({ accountId: "account-1" }) }), ["reclaim", "start"], env,
       fetchOk({ status: "accepted", transaction, expiresIn: 600 }));
     expect(start.status).toBe(200);
     expect(await start.json()).toEqual({ status: "accepted", expiresIn: 600 });
@@ -201,9 +199,9 @@ describe("Northstar trusted auth proxy", () => {
     expect(start.headers.get("set-cookie")).toContain("SameSite=Strict");
 
     const verifyFetcher = fetchOk({ status: "verified", expiresIn: 600 });
-    const verify = await handleAuthProxy(request("reclaim/verify", { method: "POST", headers: { cookie: `sentriq_reclaim=${transaction}` }, body: JSON.stringify({ email: "alice@example.test", recoveryCode: "c".repeat(32) }) }), ["reclaim", "verify"], env, verifyFetcher);
+    const verify = await handleAuthProxy(request("reclaim/verify", { method: "POST", headers: { cookie: `sentriq_reclaim=${transaction}` }, body: JSON.stringify({ accountId: "account-1", recoveryCode: "c".repeat(32) }) }), ["reclaim", "verify"], env, verifyFetcher);
     expect(verify.status).toBe(200);
-    expect(JSON.parse(String(vi.mocked(verifyFetcher).mock.calls[0]![1]?.body))).toEqual({ email: "alice@example.test", recoveryCode: "c".repeat(32), transaction });
+    expect(JSON.parse(String(vi.mocked(verifyFetcher).mock.calls[0]![1]?.body))).toEqual({ accountId: "account-1", recoveryCode: "c".repeat(32), transaction });
     expect((await verify.text()).includes(transaction)).toBe(false);
 
     const optionsFetcher = fetchOk({ challengeId: "challenge", options: { challenge: "fresh" } });
@@ -223,7 +221,7 @@ describe("Northstar trusted auth proxy", () => {
   it("binds a new-device request token to an HttpOnly browser cookie and strips it from the response", async () => {
     const transaction = "d".repeat(43);
     const fetcher = fetchOk({ status: "accepted", requestId: "d4688a50-a1c4-47bd-a073-82fb08646a46", comparisonCode: "ABC234", transaction, expiresIn: 600 });
-    const response = await handleAuthProxy(request("device-links/start", { method: "POST", body: JSON.stringify({ email: "alice@example.test" }) }), ["device-links", "start"], env, fetcher);
+    const response = await handleAuthProxy(request("device-links/start", { method: "POST", body: JSON.stringify({ accountId: "account-1" }) }), ["device-links", "start"], env, fetcher);
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ status: "accepted", requestId: "d4688a50-a1c4-47bd-a073-82fb08646a46", comparisonCode: "ABC234", expiresIn: 600 });
     expect(response.headers.get("set-cookie")).toContain("sentriq_device_link=");

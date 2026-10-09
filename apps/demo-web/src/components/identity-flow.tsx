@@ -11,7 +11,7 @@ import { AuthLanguageSelect } from "@/components/auth-language-select";
 import { Button, InlineStatus } from "@/components/primitives";
 import { northstarAuth, NorthstarAuthError } from "@/lib/auth-client";
 
-type SignupPhase = "email" | "verify-email" | "passkey" | "recovery-codes" | "complete";
+type SignupPhase = "email" | "passkey" | "recovery-codes" | "complete";
 type DeviceLinkStatus = "PENDING" | "APPROVED" | "REJECTED" | "COMPLETED" | "EXPIRED" | "CANCELLED";
 interface DeviceLinkProgress {
   requestId: string;
@@ -19,15 +19,16 @@ interface DeviceLinkProgress {
   expiresAt: number;
 }
 
-export function IdentityFlow({ mode, developmentInboxEnabled = false }: { mode: "login" | "signup"; developmentInboxEnabled?: boolean }) {
+export function IdentityFlow({ mode }: { mode: "login" | "signup" }) {
   const isSignup = mode === "signup";
   const router = useRouter();
   const { t } = useTranslation("console");
   const { preferences, ready, setPreference } = useAccessPreferences();
   const voice = useAccessVoice();
   const { refreshSession } = useDemo();
+  const [displayName, setDisplayName] = useState("");
+  const [accountId, setAccountId] = useState("");
   const [email, setEmail] = useState("");
-  const [verificationCode, setVerificationCode] = useState("");
   const [signupPhase, setSignupPhase] = useState<SignupPhase>("email");
   const [recoveryCodes, setRecoveryCodes] = useState<string[]>([]);
   const [savedCodes, setSavedCodes] = useState(false);
@@ -35,8 +36,6 @@ export function IdentityFlow({ mode, developmentInboxEnabled = false }: { mode: 
   const [deviceStatus, setDeviceStatus] = useState<DeviceLinkStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<{ kind: "error" | "success"; message: string } | null>(null);
-  const [emailError, setEmailError] = useState<string | null>(null);
-  const [codeError, setCodeError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!deviceLink || deviceStatus !== "PENDING") return;
@@ -74,83 +73,19 @@ export function IdentityFlow({ mode, developmentInboxEnabled = false }: { mode: 
     return t("auth.live.genericFailure");
   };
 
-  function validateEmail() {
-    if (!/^\S+@[^\s.]+(?:\.[^\s.]+)+$/.test(email.trim()) || email.trim().length > 254) {
-      setEmailError(t("auth.live.invalidEmail"));
-      return false;
-    }
-    setEmailError(null);
-    return true;
-  }
-
   async function beginRegistration(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setStatus(null);
-    if (!validateEmail()) return;
+    if (!displayName.trim()) return;
     setBusy(true);
     try {
-      await northstarAuth.registrationStart({ email: email.trim().toLowerCase() });
-      setSignupPhase("verify-email");
+      const result = await northstarAuth.registrationStart({ displayName: displayName.trim() });
+      setAccountId(result.accountId);
+      setSignupPhase("passkey");
       setStatus({ kind: "success", message: t("auth.live.signupSuccess") });
     } catch (error) {
       setStatus({ kind: "error", message: getFailureCopy(error) });
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function loadDevelopmentCode() {
-    if (!validateEmail()) return;
-    setBusy(true);
-    setStatus(null);
-    try {
-      const result = await northstarAuth.developmentEmailInbox({ email: email.trim().toLowerCase() });
-      setVerificationCode(result.verificationCode);
-      setStatus({ kind: "success", message: t("auth.live.developmentInboxLoaded") });
-    } catch (error) {
-      setStatus({ kind: "error", message: getFailureCopy(error) });
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function resendEmailCode() {
-    if (!validateEmail()) return;
-    setBusy(true);
-    setStatus(null);
-    try {
-      await northstarAuth.registrationStart({ email: email.trim().toLowerCase() });
-      setVerificationCode("");
-      setStatus({ kind: "success", message: t("auth.live.verificationResent") });
-    } catch (error) {
-      setStatus({ kind: "error", message: getFailureCopy(error) });
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function verifyEmail(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setStatus(null);
-    const normalizedEmail = email.trim().toLowerCase();
-    if (!validateEmail()) return;
-    if (!/^[A-Za-z0-9_-]{12}$/.test(verificationCode)) {
-      setCodeError(t("auth.live.invalidVerificationCode"));
-      return;
-    }
-    setCodeError(null);
-    setBusy(true);
-    try {
-      await northstarAuth.verifyRegistrationEmail({ email: normalizedEmail, code: verificationCode });
-      setVerificationCode("");
-      setSignupPhase("passkey");
-      setStatus({ kind: "success", message: t("auth.live.emailVerified") });
-    } catch (error) {
-      setStatus({ kind: "error", message: getFailureCopy(error) });
-      if (preferences.voiceEnabled) voice.speak("authError");
-    } finally {
-      setBusy(false);
-    }
+    } finally { setBusy(false); }
   }
 
   async function createFirstPasskey() {
@@ -173,12 +108,12 @@ export function IdentityFlow({ mode, developmentInboxEnabled = false }: { mode: 
     }
   }
 
-  async function signInWithPasskey(includeEmail: boolean) {
+  async function signInWithPasskey(includeAccountId: boolean) {
     setStatus(null);
-    if (includeEmail && !validateEmail()) return;
+    if (includeAccountId && !accountId.trim()) { setStatus({ kind: "error", message: t("auth.live.genericFailure") }); return; }
     setBusy(true);
     try {
-      const ceremony = await northstarAuth.authenticationOptions(includeEmail ? email.trim().toLowerCase() : undefined);
+      const ceremony = await northstarAuth.authenticationOptions(includeAccountId ? accountId.trim() : undefined);
       const response = await startAuthentication({
         optionsJSON: ceremony.options as Parameters<typeof startAuthentication>[0]["optionsJSON"],
       });
@@ -196,10 +131,10 @@ export function IdentityFlow({ mode, developmentInboxEnabled = false }: { mode: 
 
   async function beginDeviceLink() {
     setStatus(null);
-    if (!validateEmail()) return;
+    if (!accountId.trim()) { setStatus({ kind: "error", message: t("auth.live.genericFailure") }); return; }
     setBusy(true);
     try {
-      const result = await northstarAuth.startDeviceLink({ email: email.trim().toLowerCase() });
+      const result = await northstarAuth.startDeviceLink({ accountId: accountId.trim() });
       setDeviceLink({ requestId: result.requestId, comparisonCode: result.comparisonCode, expiresAt: Date.now() + result.expiresIn * 1_000 });
       setDeviceStatus("PENDING");
     } catch (error) {
@@ -267,8 +202,7 @@ export function IdentityFlow({ mode, developmentInboxEnabled = false }: { mode: 
     void refreshSession();
   }
 
-  const signupHeading = signupPhase === "verify-email" ? "auth.live.verifyEmailTitle"
-    : signupPhase === "passkey" ? "auth.live.createPasskeyTitle"
+  const signupHeading = signupPhase === "passkey" ? "auth.live.createPasskeyTitle"
       : signupPhase === "recovery-codes" ? "auth.live.saveRecoveryCodesTitle"
         : signupPhase === "complete" ? "auth.live.accountReadyTitle"
           : "auth.live.signupTitle";
@@ -281,8 +215,7 @@ export function IdentityFlow({ mode, developmentInboxEnabled = false }: { mode: 
           <h1 id="identity-title" tabIndex={-1}>{t(isSignup ? signupHeading : "auth.live.loginTitle")}</h1>
           <p>{t(isSignup
             ? signupPhase === "email" ? "auth.live.signupIntro"
-              : signupPhase === "verify-email" ? "auth.live.verifyEmailIntro"
-                : signupPhase === "passkey" ? "auth.live.createPasskeyDescription"
+              : signupPhase === "passkey" ? "auth.live.createPasskeyDescription"
                   : signupPhase === "recovery-codes" ? "auth.live.saveRecoveryCodesDescription"
                     : "auth.live.accountReadyDescription"
             : "auth.live.loginIntro")}</p>
@@ -317,41 +250,14 @@ export function IdentityFlow({ mode, developmentInboxEnabled = false }: { mode: 
         </div>
 
         {isSignup && signupPhase === "email" ? <form className="identity-form" onSubmit={(event) => void beginRegistration(event)} noValidate>
-          <div className="form-field">
-            <label htmlFor="email-address">{t("auth.live.emailLabel")}</label>
-            <input id="email-address" name="email" type="email" autoComplete="email" maxLength={254} required value={email}
-              aria-invalid={Boolean(emailError)} aria-describedby={emailError ? "email-error" : undefined}
-              onChange={(event) => { setEmail(event.target.value); setEmailError(null); }} />
-            {emailError ? <span id="email-error" className="field-error">{emailError}</span> : null}
-          </div>
+          <div className="form-field"><label htmlFor="display-name">{t("auth.live.displayNameLabel")}</label><input id="display-name" name="name" autoComplete="name" maxLength={100} required value={displayName} onChange={(event) => setDisplayName(event.target.value)} /></div>
+          <div className="form-field"><label htmlFor="optional-email">{t("auth.live.optionalEmailLabel")}</label><input id="optional-email" name="email" type="email" autoComplete="email" maxLength={254} value={email} onChange={(event) => setEmail(event.target.value)} /><span className="field-help">{t("auth.live.optionalEmailHint")}</span></div>
           {status ? <InlineStatus kind={status.kind} role={status.kind === "error" ? "alert" : "status"}>{status.message}</InlineStatus> : null}
-          <Button className="button-full" type="submit" disabled={busy}>{busy ? t("auth.live.working") : t("auth.live.emailContinue")}</Button>
-        </form> : null}
-
-        {isSignup && signupPhase === "verify-email" ? <form className="identity-form" onSubmit={(event) => void verifyEmail(event)} noValidate>
-          <div className="form-field">
-            <label htmlFor="email-address">{t("auth.live.emailLabel")}</label>
-            <input id="email-address" type="email" autoComplete="email" value={email} readOnly aria-describedby="verification-code-hint" />
-          </div>
-          <div className="form-field">
-            <label htmlFor="email-verification-code">{t("auth.live.verificationCodeLabel")}</label>
-            <input id="email-verification-code" name="one-time-code" type="text" autoComplete="one-time-code" inputMode="text"
-              maxLength={12} spellCheck={false} required value={verificationCode} aria-invalid={Boolean(codeError)}
-              aria-describedby={codeError ? "verification-code-error" : "verification-code-hint"}
-              onChange={(event) => { setVerificationCode(event.target.value.replace(/\s/g, "").slice(0, 12)); setCodeError(null); }} />
-            {codeError ? <span id="verification-code-error" className="field-error">{codeError}</span> : <span id="verification-code-hint" className="field-help">{t("auth.live.verificationCodeHint")}</span>}
-          </div>
-          {status ? <InlineStatus kind={status.kind} role={status.kind === "error" ? "alert" : "status"}>{status.message}</InlineStatus> : null}
-          <Button className="button-full" type="submit" disabled={busy || verificationCode.length !== 12}>{busy ? t("auth.live.working") : t("auth.live.verifyEmail")}</Button>
-          <Button className="button-full" type="button" variant="secondary" disabled={busy} onClick={() => void resendEmailCode()}>{t("auth.live.resendVerification")}</Button>
-          {developmentInboxEnabled ? <div className="development-inbox-note">
-            <p>{t("auth.live.developmentInboxHelp")}</p>
-            <Button type="button" variant="secondary" disabled={busy} onClick={() => void loadDevelopmentCode()}>{t("auth.live.developmentInboxLabel")}</Button>
-          </div> : null}
+          <Button className="button-full" type="submit" disabled={busy || !displayName.trim()}>{busy ? t("auth.live.working") : t("auth.live.signUp")}</Button>
         </form> : null}
 
         {isSignup && signupPhase === "passkey" ? <div className="identity-form">
-          <p className="field-help">{t("auth.live.verifiedEmailLabel")}: <strong>{email}</strong></p>
+          <p className="field-help">{t("auth.live.accountIdentifierLabel")}: <strong>{accountId}</strong></p>
           {status ? <InlineStatus kind={status.kind} role={status.kind === "error" ? "alert" : "status"}>{status.message}</InlineStatus> : null}
           <Button className="button-full" type="button" disabled={busy} onClick={() => void createFirstPasskey()}>{busy ? t("auth.live.working") : t("auth.live.createPasskeyAction")}</Button>
         </div> : null}
@@ -376,7 +282,7 @@ export function IdentityFlow({ mode, developmentInboxEnabled = false }: { mode: 
 
         {isSignup && signupPhase === "complete" ? <div className="identity-form">
           <dl className="registration-summary">
-            <div><dt>{t("auth.live.verifiedEmailLabel")}</dt><dd>{email}</dd></div>
+            <div><dt>{t("auth.live.accountIdentifierLabel")}</dt><dd>{accountId}</dd></div>
             <div><dt>{t("auth.live.registeredPasskeyLabel")}</dt><dd>{t("auth.live.setupComplete")}</dd></div>
             <div><dt>{t("auth.live.recoveryCodesIssuedLabel")}</dt><dd>{t("auth.live.setupComplete")}</dd></div>
           </dl>
@@ -385,15 +291,9 @@ export function IdentityFlow({ mode, developmentInboxEnabled = false }: { mode: 
 
         {!isSignup ? <>
           <form className="identity-form" onSubmit={(event) => { event.preventDefault(); void signInWithPasskey(true); }} noValidate>
-            <div className="form-field">
-              <label htmlFor="email-address">{t("auth.live.emailLabel")}</label>
-              <input id="email-address" name="email" type="email" autoComplete="email" maxLength={254} required value={email}
-                aria-invalid={Boolean(emailError)} aria-describedby={emailError ? "email-error" : undefined}
-                onChange={(event) => { setEmail(event.target.value); setEmailError(null); }} />
-              {emailError ? <span id="email-error" className="field-error">{emailError}</span> : null}
-            </div>
+            <div className="form-field"><label htmlFor="account-id">{t("auth.live.accountIdentifierLabel")}</label><input id="account-id" name="accountId" autoComplete="username" maxLength={64} value={accountId} onChange={(event) => setAccountId(event.target.value)} /><span className="field-help">{t("auth.live.accountIdentifierHint")}</span></div>
             {status ? <InlineStatus kind={status.kind} role={status.kind === "error" ? "alert" : "status"}>{status.message}</InlineStatus> : null}
-            <Button className="button-full" type="submit" disabled={busy}>{busy ? t("auth.live.working") : t("auth.live.passkeyLogin")}</Button>
+            <Button className="button-full" type="submit" disabled={busy || !accountId.trim()}>{busy ? t("auth.live.working") : t("auth.live.passkeyLogin")}</Button>
           </form>
           <div className="auth-method-divider"><span>{t("auth.live.or")}</span></div>
           <Button className="button-full" variant="secondary" type="button" disabled={busy} onClick={() => void signInWithPasskey(false)}>{t("auth.live.discoverableSignIn")}</Button>

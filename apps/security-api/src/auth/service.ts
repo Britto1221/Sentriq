@@ -8,18 +8,15 @@ import type { ApplicationScope } from "../app";
 import type { ApiConfig } from "../config";
 
 type QueryClient = Pick<PGlite | Transaction, "query">;
-interface UserRow { id: string; email: string; display_name: string; role: "user" | "developer" | "admin"; passkey_enrollment_required: boolean; email_verified_at?: Date | null }
+interface UserRow { id: string; email: string | null; display_name: string; role: "user" | "developer" | "admin"; passkey_enrollment_required: boolean }
 interface SessionRow extends UserRow { session_id: string; expires_at: Date }
 interface CredentialRow { id: string; user_id: string; credential_id: string; public_key: string; counter: number; transports: AuthenticatorTransport[] }
 interface ChallengeRow { id: string; challenge: string; user_id: string | null; session_id: string | null; expected_origin: string | null; expected_rp_id: string | null; account_digest: string | null }
 interface PasskeySummaryRow { id: string; display_name: string; created_at: Date; device_type: "singleDevice" | "multiDevice"; backed_up: boolean }
 export class AuthenticationError extends Error { constructor() { super("Authentication failed"); } }
-export class EmailDeliveryUnavailable extends Error { constructor() { super("Email delivery unavailable"); } }
 class ReclaimCommitError extends Error { constructor() { super("Recovery transaction could not be committed"); } }
-export interface EmailSender { sendVerification(input: { email: string; code: string; expiresAt: Date }): Promise<void> }
 const fail = (): never => { throw new AuthenticationError(); };
 const token = () => randomBytes(32).toString("base64url");
-const verificationCode = () => randomBytes(9).toString("base64url");
 const comparisonAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const newComparisonCode = () => [...randomBytes(6)].map((value) => comparisonAlphabet[value & 31]).join("");
 const newRecoveryCodes = () => Array.from({ length: 6 }, () => randomBytes(24).toString("base64url"));
@@ -59,15 +56,14 @@ export function sessionCookie(applicationId: string, config: ApiConfig, value: s
   return `${cookieName(applicationId, config.nodeEnv === "production")}=${clear ? "" : value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${clear ? 0 : 43200}${config.nodeEnv === "production" ? "; Secure" : ""}`;
 }
 
-export async function createAuthService(database: Database, config: ApiConfig, emailSender?: EmailSender) {
-  const developmentInbox = new Map<string, { code: string; expiresAt: number }>();
-  const lookupUser = async (tx: QueryClient, scope: ApplicationScope, email: string) => (await tx.query<UserRow>(
-    "SELECT id,email,display_name,role,passkey_enrollment_required,email_verified_at FROM users WHERE tenant_id=$1 AND application_id=$2 AND email=$3 AND deleted_at IS NULL", [...scopeValues(scope), email],
+export async function createAuthService(database: Database, config: ApiConfig) {
+  const lookupUserById = async (tx: QueryClient, scope: ApplicationScope, userId: string) => (await tx.query<UserRow>(
+    "SELECT id,email,display_name,role,passkey_enrollment_required FROM users WHERE tenant_id=$1 AND application_id=$2 AND id=$3 AND deleted_at IS NULL", [...scopeValues(scope), userId],
   )).rows[0];
   const getSession = async (tx: QueryClient, scope: ApplicationScope, opaque: string | undefined): Promise<SessionRow | undefined> => {
     if (!opaque || !/^[A-Za-z0-9_-]{43}$/.test(opaque)) return undefined;
     return (await tx.query<SessionRow>(
-      "SELECT u.id,u.email,u.display_name,u.role,u.passkey_enrollment_required,s.id AS session_id,s.expires_at FROM sessions s JOIN users u ON u.id=s.user_id AND u.tenant_id=s.tenant_id AND u.application_id=s.application_id WHERE s.tenant_id=$1 AND s.application_id=$2 AND s.token_digest=$3 AND s.revoked_at IS NULL AND s.expires_at>now() AND u.deleted_at IS NULL", [...scopeValues(scope), digestToken(opaque)],
+    "SELECT u.id,u.email,u.display_name,u.role,u.passkey_enrollment_required,s.id AS session_id,s.expires_at FROM sessions s JOIN users u ON u.id=s.user_id AND u.tenant_id=s.tenant_id AND u.application_id=s.application_id WHERE s.tenant_id=$1 AND s.application_id=$2 AND s.token_digest=$3 AND s.revoked_at IS NULL AND s.expires_at>now() AND u.deleted_at IS NULL", [...scopeValues(scope), digestToken(opaque)],
     )).rows[0];
   };
   const requireSession = async (tx: QueryClient, scope: ApplicationScope, opaque: string | undefined) => (await getSession(tx, scope, opaque)) ?? fail();
@@ -99,76 +95,22 @@ export async function createAuthService(database: Database, config: ApiConfig, e
   )).rows[0];
 
   return {
-    async registrationStart(scope: ApplicationScope, email: string, correlationId: string) {
-      if (config.nodeEnv === "production" && !emailSender) throw new EmailDeliveryUnavailable();
-      const existing = await lookupUser(database.client, scope, email);
-      const credentials = existing ? await database.client.query("SELECT id FROM webauthn_credentials WHERE tenant_id=$1 AND application_id=$2 AND user_id=$3 LIMIT 1", [...scopeValues(scope), existing.id]) : { rows: [] };
-      if (existing?.email_verified_at || credentials.rows.length) return { status: "accepted" as const };
-
-      const code = verificationCode();
-      const expiresAt = new Date(Date.now() + 10 * 60_000);
-      await database.client.transaction(async (tx) => {
-        await tx.query("UPDATE email_verification_transactions SET state='CANCELLED' WHERE tenant_id=$1 AND application_id=$2 AND email=$3 AND state IN ('PENDING','VERIFIED')", [...scopeValues(scope), email]);
-        await tx.query("INSERT INTO email_verification_transactions(id,tenant_id,application_id,user_id,email,account_digest,verification_digest,registration_digest,state,expires_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'PENDING',now()+interval '10 minutes')",
-          [randomUUID(), ...scopeValues(scope), existing?.id ?? null, email, digestToken(email), digestToken(code), digestToken(token())]);
-        await audit(tx, scope, correlationId, "AUTH_EMAIL_VERIFICATION_SENT", "INFO", existing?.id);
-      });
-      if (emailSender) await emailSender.sendVerification({ email, code, expiresAt });
-      else developmentInbox.set(email, { code, expiresAt: expiresAt.getTime() });
-      return { status: "accepted" as const };
-    },
-    developmentEmailCode(email: string) {
-      if (config.nodeEnv === "production") return undefined;
-      const item = developmentInbox.get(email);
-      return item && item.expiresAt > Date.now() ? { verificationCode: item.code, expiresAt: new Date(item.expiresAt).toISOString() } : undefined;
-    },
-    async registrationVerifyEmail(scope: ApplicationScope, email: string, code: string, correlationId: string) {
+    async registrationStart(scope: ApplicationScope, displayName: string, email: string | undefined, correlationId: string) {
+      const userId = randomUUID();
       const registrationToken = token();
-      const verified = await database.client.transaction(async (tx) => {
-        const item = (await tx.query<{ id: string; user_id: string | null; state: string; failed_attempts: number; expires_at: Date; verification_digest: string }>(
-          "SELECT id,user_id,state,failed_attempts,expires_at,verification_digest FROM email_verification_transactions WHERE tenant_id=$1 AND application_id=$2 AND email=$3 FOR UPDATE",
-          [...scopeValues(scope), email])).rows.find((row) => row.state === "PENDING");
-        if (!item) return false;
-        if (item.expires_at <= new Date()) {
-          await tx.query("UPDATE email_verification_transactions SET state='EXPIRED' WHERE id=$1", [item.id]); return false;
-        }
-        if (item.failed_attempts >= 5) return false;
-        const candidate = digestToken(code);
-        const stored = item.verification_digest;
-        const validCode = Boolean(stored && /^[a-f0-9]{64}$/.test(stored) && timingSafeEqual(Buffer.from(candidate, "hex"), Buffer.from(stored, "hex")));
-        if (!validCode) {
-          await tx.query("UPDATE email_verification_transactions SET failed_attempts=LEAST(failed_attempts+1,5),state=CASE WHEN failed_attempts>=4 THEN 'EXPIRED' ELSE state END WHERE id=$1 AND state='PENDING'", [item.id]);
-          await audit(tx, scope, correlationId, "AUTH_EMAIL_VERIFICATION_FAILED", "FAILURE", item.user_id ?? undefined);
-          return false;
-        }
-        let user = item.user_id ? await lookupUser(tx, scope, email) : undefined;
-        if (!user) {
-          const existing = await lookupUser(tx, scope, email);
-          if (existing) user = existing;
-          else {
-            const displayName = email.slice(0, email.indexOf("@")).slice(0, 100) || "Northstar user";
-            const inserted = await tx.query<{ id: string }>("INSERT INTO users(id,tenant_id,application_id,email,display_name,email_verified_at) VALUES ($1,$2,$3,$4,$5,now()) ON CONFLICT (tenant_id,application_id,email) DO NOTHING RETURNING id",
-              [randomUUID(), ...scopeValues(scope), email, displayName]);
-            if (!inserted.rows[0]) return false;
-            user = await lookupUser(tx, scope, email);
-            await tx.query("INSERT INTO user_resources(id,tenant_id,application_id,user_id,kind,data) VALUES ($1,$2,$3,$4,'account',$5)",
-              [`account-${user!.id}`, ...scopeValues(scope), user!.id, JSON.stringify({ email, displayName })]);
-          }
-        }
-        if (!user) return false;
-        const credentials = await tx.query("SELECT id FROM webauthn_credentials WHERE tenant_id=$1 AND application_id=$2 AND user_id=$3 LIMIT 1", [...scopeValues(scope), user.id]);
-        if (credentials.rows.length) {
-          await tx.query("UPDATE email_verification_transactions SET state='CANCELLED' WHERE id=$1", [item.id]);
-          return false;
-        }
-        await tx.query("UPDATE users SET email_verified_at=COALESCE(email_verified_at,now()) WHERE tenant_id=$1 AND application_id=$2 AND id=$3", [...scopeValues(scope), user.id]);
-        await tx.query("UPDATE email_verification_transactions SET user_id=$1,state='VERIFIED',verified_at=now(),registration_digest=$2 WHERE id=$3 AND state='PENDING' AND expires_at>now()", [user.id, digestToken(registrationToken), item.id]);
-        await audit(tx, scope, correlationId, "AUTH_EMAIL_VERIFICATION_COMPLETED", "SUCCESS", user.id);
-        return true;
+      const user = await database.client.transaction(async (tx) => {
+        const inserted = await tx.query<UserRow>("INSERT INTO users(id,tenant_id,application_id,email,display_name) VALUES ($1,$2,$3,$4,$5) RETURNING id,email,display_name,role,passkey_enrollment_required",
+          [userId, ...scopeValues(scope), email?.trim().toLowerCase() ?? null, displayName]);
+        const createdUser = inserted.rows[0];
+        if (!createdUser) return fail();
+        await tx.query("INSERT INTO passkey_enrollment_transactions(id,tenant_id,application_id,user_id,token_digest,expires_at) VALUES ($1,$2,$3,$4,$5,now()+interval '10 minutes')",
+          [randomUUID(), ...scopeValues(scope), userId, digestToken(registrationToken)]);
+        await tx.query("INSERT INTO user_resources(id,tenant_id,application_id,user_id,kind,data) VALUES ($1,$2,$3,$4,'account',$5)",
+          [`account-${userId}`, ...scopeValues(scope), userId, JSON.stringify({ displayName })]);
+        await audit(tx, scope, correlationId, "AUTH_REGISTRATION_STARTED", "INFO", userId);
+        return createdUser;
       });
-      if (!verified) return fail();
-      developmentInbox.delete(email);
-      return { status: "verified" as const, registrationToken, expiresIn: 600 };
+      return { status: "accepted" as const, accountId: user.id, registrationToken, expiresIn: 600 };
     },
     async session(scope: ApplicationScope, opaque?: string) {
       const row = await requireSession(database.client, scope, opaque);
@@ -290,7 +232,7 @@ export async function createAuthService(database: Database, config: ApiConfig, e
       await database.client.transaction(async (tx) => {
         const owner = await requireSession(tx, scope, opaque);
         const deleted = await tx.query<{ id: string }>(
-          "UPDATE users SET email='deleted+' || id || '@invalid.example',display_name='Deleted account',deleted_at=now(),passkey_enrollment_required=true WHERE id=$1 AND tenant_id=$2 AND application_id=$3 AND deleted_at IS NULL RETURNING id",
+          "UPDATE users SET email=NULL,display_name='Deleted account',deleted_at=now(),passkey_enrollment_required=true WHERE id=$1 AND tenant_id=$2 AND application_id=$3 AND deleted_at IS NULL RETURNING id",
           [owner.id, ...scopeValues(scope)],
         );
         if (!deleted.rows.length) return fail();
@@ -308,18 +250,18 @@ export async function createAuthService(database: Database, config: ApiConfig, e
       return database.client.transaction(async (tx) => {
         if (opaque || !registrationToken || !/^[A-Za-z0-9_-]{43}$/.test(registrationToken)) return fail();
         const registration = (await tx.query<{ id: string; user_id: string; state: string; expires_at: Date }>(
-          "SELECT id,user_id,state,expires_at FROM email_verification_transactions WHERE registration_digest=$1 AND tenant_id=$2 AND application_id=$3 FOR UPDATE",
+          "SELECT id,user_id,state,expires_at FROM passkey_enrollment_transactions WHERE token_digest=$1 AND tenant_id=$2 AND application_id=$3 FOR UPDATE",
           [digestToken(registrationToken), ...scopeValues(scope)])).rows[0];
-        if (!registration || registration.state !== "VERIFIED" || registration.expires_at <= new Date()) return fail();
-        const user = (await tx.query<UserRow>("SELECT id,email,display_name,role,passkey_enrollment_required,email_verified_at FROM users WHERE tenant_id=$1 AND application_id=$2 AND id=$3 AND email_verified_at IS NOT NULL AND deleted_at IS NULL", [...scopeValues(scope), registration.user_id])).rows[0];
+        if (!registration || registration.state !== "PENDING" || registration.expires_at <= new Date()) return fail();
+        const user = (await tx.query<UserRow>("SELECT id,email,display_name,role,passkey_enrollment_required FROM users WHERE tenant_id=$1 AND application_id=$2 AND id=$3 AND deleted_at IS NULL", [...scopeValues(scope), registration.user_id])).rows[0];
         if (!user) return fail();
         const credentials = (await tx.query<CredentialRow>("SELECT credential_id,transports FROM webauthn_credentials WHERE tenant_id=$1 AND application_id=$2 AND user_id=$3", [...scopeValues(scope), user.id])).rows;
         if (credentials.length) return fail();
         const app = await application(tx, scope, origin);
-        const options = await generateRegistrationOptions({ rpName: app.name, rpID: app.rp_id, userName: user.email, userID: new Uint8Array(Buffer.from(user.id)), userDisplayName: user.display_name,
+        const options = await generateRegistrationOptions({ rpName: app.name, rpID: app.rp_id, userName: user.id, userID: new Uint8Array(Buffer.from(user.id)), userDisplayName: user.display_name,
           timeout: 300_000, attestationType: "none", supportedAlgorithmIDs: [-7, -257], authenticatorSelection: { residentKey: "required", userVerification: "required" },
           excludeCredentials: credentials.map((credential) => ({ id: credential.credential_id, transports: credential.transports })) });
-        const challengeId = await storeChallenge(tx, scope, "registration", options.challenge, origin, app.rp_id, undefined, user.id);
+        const challengeId = await storeChallenge(tx, scope, "registration", options.challenge, origin, app.rp_id, undefined, user.id, digestToken(registrationToken));
         return { challengeId, options };
       });
     },
@@ -327,13 +269,13 @@ export async function createAuthService(database: Database, config: ApiConfig, e
       if (opaque || !registrationToken || !/^[A-Za-z0-9_-]{43}$/.test(registrationToken)) return fail();
       const completed = await database.client.transaction(async (tx) => {
         const registration = (await tx.query<{ id: string; user_id: string; state: string; expires_at: Date }>(
-          "SELECT id,user_id,state,expires_at FROM email_verification_transactions WHERE registration_digest=$1 AND tenant_id=$2 AND application_id=$3 FOR UPDATE",
+          "SELECT id,user_id,state,expires_at FROM passkey_enrollment_transactions WHERE token_digest=$1 AND tenant_id=$2 AND application_id=$3 FOR UPDATE",
           [digestToken(registrationToken), ...scopeValues(scope)])).rows[0];
-        if (!registration || registration.state !== "VERIFIED" || registration.expires_at <= new Date()) return null;
-        const user = (await tx.query<UserRow>("SELECT id,email,display_name,role,passkey_enrollment_required,email_verified_at FROM users WHERE tenant_id=$1 AND application_id=$2 AND id=$3 AND email_verified_at IS NOT NULL AND deleted_at IS NULL", [...scopeValues(scope), registration.user_id])).rows[0];
+        if (!registration || registration.state !== "PENDING" || registration.expires_at <= new Date()) return null;
+        const user = (await tx.query<UserRow>("SELECT id,email,display_name,role,passkey_enrollment_required FROM users WHERE tenant_id=$1 AND application_id=$2 AND id=$3 AND deleted_at IS NULL", [...scopeValues(scope), registration.user_id])).rows[0];
         if (!user) return null;
         const challenge = await consumeChallenge(tx, scope, id, "registration", undefined, user.id);
-        if (!challenge?.expected_origin || !challenge.expected_rp_id) return false;
+        if (!challenge?.expected_origin || !challenge.expected_rp_id || challenge.account_digest !== digestToken(registrationToken)) return false;
         try {
           requireTopLevelClientData(response.response.clientDataJSON);
           const currentApplication = await application(tx, scope, challenge.expected_origin);
@@ -348,7 +290,7 @@ export async function createAuthService(database: Database, config: ApiConfig, e
             [`passkey-${inserted.rows[0]!.id}`, ...scopeValues(scope), user.id, JSON.stringify({ credentialRecordId: inserted.rows[0]!.id, revoked: false })]);
           const codes = newRecoveryCodes();
           for (const code of codes) await tx.query("INSERT INTO recovery_codes(id,tenant_id,application_id,user_id,verifier) VALUES ($1,$2,$3,$4,$5)", [randomUUID(), ...scopeValues(scope), user.id, recoveryCodeVerifier(code)]);
-          const marked = await tx.query("UPDATE email_verification_transactions SET state='COMPLETED',completed_at=now() WHERE id=$1 AND state='VERIFIED' AND expires_at>now() RETURNING id", [registration.id]);
+          const marked = await tx.query("UPDATE passkey_enrollment_transactions SET state='COMPLETED',completed_at=now() WHERE id=$1 AND tenant_id=$2 AND application_id=$3 AND user_id=$4 AND state='PENDING' AND expires_at>now() RETURNING id", [registration.id, ...scopeValues(scope), user.id]);
           if (!marked.rows.length) return null;
           await tx.query("UPDATE users SET passkey_enrollment_required=false WHERE id=$1 AND tenant_id=$2 AND application_id=$3", [user.id, ...scopeValues(scope)]);
           await audit(tx, scope, correlationId, "AUTH_PASSKEY_ADDED", "SUCCESS", user.id);
@@ -359,12 +301,12 @@ export async function createAuthService(database: Database, config: ApiConfig, e
       });
       if (!completed) return fail(); return { verified: true, ...completed };
     },
-    async authenticationOptions(scope: ApplicationScope, origin: string, email?: string) {
+    async authenticationOptions(scope: ApplicationScope, origin: string, accountId?: string) {
       return database.client.transaction(async (tx) => {
         const app = await application(tx, scope, origin);
         // Discoverable login avoids disclosing account/credential availability.
         const options = await generateAuthenticationOptions({ rpID: app.rp_id, timeout: 300_000, userVerification: "required" });
-        const challengeId = await storeChallenge(tx, scope, "authentication", options.challenge, origin, app.rp_id, undefined, undefined, email ? digestToken(email) : undefined);
+        const challengeId = await storeChallenge(tx, scope, "authentication", options.challenge, origin, app.rp_id, undefined, undefined, accountId ? digestToken(accountId) : undefined);
         return { challengeId, options };
       });
     },
@@ -373,9 +315,9 @@ export async function createAuthService(database: Database, config: ApiConfig, e
         const challenge = await consumeChallenge(tx, scope, id, "authentication");
         if (!challenge?.expected_origin || !challenge.expected_rp_id) return null;
         const credential = (await tx.query<CredentialRow>("SELECT id,user_id,credential_id,public_key,counter,transports FROM webauthn_credentials WHERE tenant_id=$1 AND application_id=$2 AND credential_id=$3", [...scopeValues(scope), response.id])).rows[0];
-        const user = credential ? (await tx.query<UserRow>("SELECT id,email,display_name,role,passkey_enrollment_required,email_verified_at FROM users WHERE tenant_id=$1 AND application_id=$2 AND id=$3 AND deleted_at IS NULL", [...scopeValues(scope), credential.user_id])).rows[0] : undefined;
+        const user = credential ? (await tx.query<UserRow>("SELECT id,email,display_name,role,passkey_enrollment_required FROM users WHERE tenant_id=$1 AND application_id=$2 AND id=$3 AND deleted_at IS NULL", [...scopeValues(scope), credential.user_id])).rows[0] : undefined;
         if (!credential || !user || response.response.userHandle !== Buffer.from(user.id).toString("base64url")) return null;
-        if (challenge.account_digest && digestToken(user.email) !== challenge.account_digest) return null;
+        if (challenge.account_digest && digestToken(user.id) !== challenge.account_digest) return null;
         try {
           requireTopLevelClientData(response.response.clientDataJSON);
           const currentApplication = await application(tx, scope, challenge.expected_origin);
@@ -388,16 +330,16 @@ export async function createAuthService(database: Database, config: ApiConfig, e
         } catch { await audit(tx, scope, correlationId, "AUTH_LOGIN_FAILED", "FAILURE", user.id); return null; }
       }); return result ?? fail();
     },
-    async deviceLinkStart(scope: ApplicationScope, email: string, correlationId: string) {
+    async deviceLinkStart(scope: ApplicationScope, accountId: string, correlationId: string) {
       const transaction = token(); const requestId = randomUUID(); const comparisonCode = newComparisonCode();
-      const existing = await lookupUser(database.client, scope, email);
-      const credentials = existing && existing.email_verified_at
+      const existing = await lookupUserById(database.client, scope, accountId);
+      const credentials = existing
         ? await database.client.query("SELECT id FROM webauthn_credentials WHERE tenant_id=$1 AND application_id=$2 AND user_id=$3 LIMIT 1", [...scopeValues(scope), existing.id])
         : { rows: [] };
       const userId = credentials.rows.length ? existing?.id ?? null : null;
       await database.client.transaction(async (tx) => {
-        await tx.query("INSERT INTO device_link_requests(id,tenant_id,application_id,user_id,email_digest,token_digest,comparison_code,state,expires_at) VALUES ($1,$2,$3,$4,$5,$6,$7,'PENDING',now()+interval '10 minutes')",
-          [requestId, ...scopeValues(scope), userId, digestToken(email), digestToken(transaction), comparisonCode]);
+        await tx.query("INSERT INTO device_link_requests(id,tenant_id,application_id,user_id,account_digest,token_digest,comparison_code,state,expires_at) VALUES ($1,$2,$3,$4,$5,$6,$7,'PENDING',now()+interval '10 minutes')",
+          [requestId, ...scopeValues(scope), userId, digestToken(accountId), digestToken(transaction), comparisonCode]);
         await audit(tx, scope, correlationId, "AUTH_DEVICE_LINK_REQUESTED", "INFO", userId ?? undefined);
       });
       return { status: "accepted" as const, requestId, comparisonCode, transaction, expiresIn: 600 };
@@ -494,11 +436,11 @@ export async function createAuthService(database: Database, config: ApiConfig, e
           "SELECT id,user_id,state,expires_at FROM device_link_requests WHERE id=$1 AND tenant_id=$2 AND application_id=$3 AND token_digest=$4 FOR UPDATE",
           [requestId, ...scopeValues(scope), digestToken(transaction)])).rows[0];
         if (!row || row.state !== "APPROVED" || !row.user_id || row.expires_at <= new Date()) return fail();
-        const user = (await tx.query<UserRow>("SELECT id,email,display_name,role,passkey_enrollment_required,email_verified_at FROM users WHERE tenant_id=$1 AND application_id=$2 AND id=$3 AND deleted_at IS NULL", [...scopeValues(scope), row.user_id])).rows[0];
+        const user = (await tx.query<UserRow>("SELECT id,email,display_name,role,passkey_enrollment_required FROM users WHERE tenant_id=$1 AND application_id=$2 AND id=$3 AND deleted_at IS NULL", [...scopeValues(scope), row.user_id])).rows[0];
         if (!user) return fail();
         const app = await application(tx, scope, origin);
         const credentials = (await tx.query<CredentialRow>("SELECT credential_id,transports FROM webauthn_credentials WHERE tenant_id=$1 AND application_id=$2 AND user_id=$3", [...scopeValues(scope), user.id])).rows;
-        const options = await generateRegistrationOptions({ rpName: app.name, rpID: app.rp_id, userName: user.email, userID: new Uint8Array(Buffer.from(user.id)), userDisplayName: user.display_name,
+        const options = await generateRegistrationOptions({ rpName: app.name, rpID: app.rp_id, userName: user.id, userID: new Uint8Array(Buffer.from(user.id)), userDisplayName: user.display_name,
           timeout: 300_000, attestationType: "none", supportedAlgorithmIDs: [-7, -257], authenticatorSelection: { residentKey: "required", userVerification: "required" },
           excludeCredentials: credentials.map((credential) => ({ id: credential.credential_id, transports: credential.transports })) });
         const challengeId = randomUUID();
@@ -519,7 +461,7 @@ export async function createAuthService(database: Database, config: ApiConfig, e
         const consumed = await tx.query("UPDATE device_link_requests SET registration_challenge_id=NULL,registration_challenge=NULL,registration_expected_origin=NULL,registration_expected_rp_id=NULL,registration_expires_at=NULL WHERE id=$1 AND tenant_id=$2 AND application_id=$3 AND state='APPROVED' AND registration_challenge_id=$4 AND registration_expires_at>now() RETURNING id",
           [requestId, ...scopeValues(scope), challengeId]);
         if (!consumed.rows.length) return null;
-        const user = (await tx.query<UserRow>("SELECT id,email,display_name,role,passkey_enrollment_required,email_verified_at FROM users WHERE tenant_id=$1 AND application_id=$2 AND id=$3 AND deleted_at IS NULL", [...scopeValues(scope), row.user_id])).rows[0];
+        const user = (await tx.query<UserRow>("SELECT id,email,display_name,role,passkey_enrollment_required FROM users WHERE tenant_id=$1 AND application_id=$2 AND id=$3 AND deleted_at IS NULL", [...scopeValues(scope), row.user_id])).rows[0];
         if (!user) return null;
         try {
           requireTopLevelClientData(response.response.clientDataJSON);
@@ -551,21 +493,21 @@ export async function createAuthService(database: Database, config: ApiConfig, e
       if (!updated.rows.length) return fail();
       return { status: "CANCELLED" as const };
     },
-    async reclaimStart(scope: ApplicationScope, email: string, correlationId: string) {
+    async reclaimStart(scope: ApplicationScope, accountId: string, correlationId: string) {
       const transaction = token();
       await database.client.transaction(async (tx) => {
-        const user = await lookupUser(tx, scope, email);
+        const user = await lookupUserById(tx, scope, accountId);
         await tx.query("INSERT INTO reclaim_transactions(id,tenant_id,application_id,user_id,account_digest,token_digest,state,expires_at) VALUES ($1,$2,$3,$4,$5,$6,'NOT_STARTED',now()+interval '10 minutes')",
-          [randomUUID(), ...scopeValues(scope), user?.id ?? null, digestToken(email), digestToken(transaction)]);
+          [randomUUID(), ...scopeValues(scope), user?.id ?? null, digestToken(accountId), digestToken(transaction)]);
         await audit(tx, scope, correlationId, "AUTH_RECOVERY_STARTED", "INFO", user?.id);
       });
       return { status: "accepted" as const, transaction, expiresIn: 600 };
     },
-    async reclaimVerify(scope: ApplicationScope, input: { email: string; transaction: string; recoveryCode: string }, correlationId: string) {
+    async reclaimVerify(scope: ApplicationScope, input: { accountId: string; transaction: string; recoveryCode: string }, correlationId: string) {
       const accepted = await database.client.transaction(async (tx) => {
         const row = (await tx.query<{ id: string; user_id: string | null; state: string; failed_attempts: number; expires_at: Date }>(
           "SELECT id,user_id,state,failed_attempts,expires_at FROM reclaim_transactions WHERE token_digest=$1 AND tenant_id=$2 AND application_id=$3 AND account_digest=$4 FOR UPDATE",
-          [digestToken(input.transaction), ...scopeValues(scope), digestToken(input.email)],
+          [digestToken(input.transaction), ...scopeValues(scope), digestToken(input.accountId)],
         )).rows[0];
         if (!row) return false;
         if (row.expires_at <= new Date()) {
@@ -608,7 +550,7 @@ export async function createAuthService(database: Database, config: ApiConfig, e
         const app = await application(tx, scope, origin);
         await tx.query("UPDATE webauthn_challenges SET consumed_at=now() WHERE tenant_id=$1 AND application_id=$2 AND user_id=$3 AND purpose='recovery_registration' AND consumed_at IS NULL", [...scopeValues(scope), user.id]);
         const credentials = (await tx.query<CredentialRow>("SELECT id,user_id,credential_id,public_key,counter,transports FROM webauthn_credentials WHERE tenant_id=$1 AND application_id=$2 AND user_id=$3", [...scopeValues(scope), user.id])).rows;
-        const options = await generateRegistrationOptions({ rpName: app.name, rpID: app.rp_id, userName: user.email, userID: new Uint8Array(Buffer.from(user.id)), userDisplayName: user.display_name,
+        const options = await generateRegistrationOptions({ rpName: app.name, rpID: app.rp_id, userName: user.id, userID: new Uint8Array(Buffer.from(user.id)), userDisplayName: user.display_name,
           timeout: 300_000, attestationType: "none", supportedAlgorithmIDs: [-7, -257], authenticatorSelection: { residentKey: "required", userVerification: "required" },
           excludeCredentials: credentials.map((credential) => ({ id: credential.credential_id, transports: credential.transports })) });
         const challengeId = randomUUID();

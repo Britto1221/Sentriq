@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
-interface Account { id: string; email: string; displayName: string }
+interface Account { id: string; email?: string | null; displayName: string }
 interface Passkey { id: string; createdAt: string; deviceType: string; backedUp: boolean }
 
 export function Profile() {
@@ -24,5 +24,5 @@ export function Profile() {
     const response = await fetch("/api/logout", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
     if (response.ok) location.assign("/login"); else setMessage("Sign out could not be completed.");
   }
-  return <main className="shell narrow"><Link className="back" href="/">← Home</Link><section className="panel" aria-labelledby="profile-title"><p className="eyebrow">Host profile</p><h1 id="profile-title">Your account</h1>{account ? <><dl><dt>Name</dt><dd>{account.displayName}</dd><dt>Verified email</dt><dd>{account.email}</dd></dl><h2>Registered passkey</h2><ul>{passkeys.map((key) => <li key={key.id}>{key.deviceType}; {key.backedUp ? "sync-backup reported" : "backup not reported"}; added {new Date(key.createdAt).toLocaleDateString()}</li>)}</ul><p>Credential management and recovery are not yet exposed by the public SDK integration.</p><button className="button" onClick={() => void signOut()}>Sign out</button></> : <p role="status">{message}<br /><Link href="/login">Sign in</Link></p>}</section></main>;
+  return <main className="shell narrow"><Link className="back" href="/">← Home</Link><section className="panel" aria-labelledby="profile-title"><p className="eyebrow">Host profile</p><h1 id="profile-title">Your account</h1>{account ? <><dl><dt>Account ID</dt><dd><code>{account.id}</code></dd><dt>Name</dt><dd>{account.displayName}</dd>{account.email ? <><dt>Email</dt><dd>{account.email}</dd></> : null}</dl><h2>Registered passkey</h2><ul>{passkeys.map((key) => <li key={key.id}>{key.deviceType}; {key.backedUp ? "sync-backup reported" : "backup not reported"}; added {new Date(key.createdAt).toLocaleDateString()}</li>)}</ul><p>Credential management and recovery are not yet exposed by this public SDK integration example.</p><button className="button" onClick={() => void signOut()}>Sign out</button></> : <p role="status">{message}<br /><Link href="/login">Sign in</Link></p>}</section></main>;
 }
