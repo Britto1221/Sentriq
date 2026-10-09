@@ -1581,8 +1581,15 @@ h3 {
   .header-tools {
     grid-column: auto;
     grid-row: auto;
-    justify-content: space-between;
+    width: 100%;
+    justify-content: flex-end;
     gap: 8px;
+  }
+
+  .header-auth-links {
+    width: auto;
+    margin-left: auto;
+    flex: 0 0 auto;
   }
 
   .header-sample-tag { font-size: 11px; }
