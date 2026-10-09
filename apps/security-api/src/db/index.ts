@@ -35,7 +35,9 @@ export async function migrateDatabase(client: PGlite): Promise<void> {
     for (const { name, sql, checksum } of migrations) {
       const applied = await tx.query<{ checksum: string }>("SELECT checksum FROM schema_migrations WHERE name=$1", [name]);
       if (applied.rows[0]) {
-        if (applied.rows[0].checksum !== checksum) throw new Error("Applied migration checksum mismatch");
+        if (applied.rows[0].checksum !== checksum) {
+          throw new Error(`Applied migration checksum mismatch for ${name}: stored=${applied.rows[0].checksum}, expected=${checksum}`);
+        }
         continue;
       }
       await tx.exec(sql);

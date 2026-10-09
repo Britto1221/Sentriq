@@ -7,6 +7,7 @@ const knownMigrationErrors = new Set([
   "Production requires an absolute persistent data directory and explicit TLS termination",
   "Applied migration checksum mismatch",
 ]);
+const migrationChecksumMismatch = /^Applied migration checksum mismatch for [a-z0-9_]+: stored=[a-f0-9]{64}, expected=[a-f0-9]{64}$/;
 
 export function describeMigrationFailure(phase: string, cause: unknown): string {
   const error = cause instanceof Error ? cause : undefined;
@@ -18,6 +19,8 @@ export function describeMigrationFailure(phase: string, cause: unknown): string 
   const safeMessage = error?.message
     ? knownMigrationErrors.has(error.message)
       ? error.message
+      : migrationChecksumMismatch.test(error.message)
+        ? error.message
       : error.message.replace(secretLikeValue, "$1=[redacted]").replace(windowsPath, "[path]").replace(unixPath, "[path]").slice(0, 180)
     : "No error message available";
 

@@ -20,4 +20,11 @@ describe("describeMigrationFailure", () => {
     expect(describeMigrationFailure("migration", new Error("Applied migration checksum mismatch")))
       .toContain("Applied migration checksum mismatch");
   });
+
+  it("preserves only the structured migration name and checksums for drift diagnosis", () => {
+    const message = `Applied migration checksum mismatch for 0001_foundation: stored=${"a".repeat(64)}, expected=${"b".repeat(64)}`;
+    expect(describeMigrationFailure("migration", new Error(message))).toContain(message);
+    expect(describeMigrationFailure("migration", new Error(`${message}; password=hunter2`)))
+      .not.toContain("hunter2");
+  });
 });
