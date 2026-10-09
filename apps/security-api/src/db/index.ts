@@ -24,7 +24,13 @@ const migrationNames = ["0001_foundation", "0002_audit_truncate", "0003_authenti
 async function expectedMigrations() {
   return Promise.all(migrationNames.map(async (name) => {
     const sql = await readFile(new URL(`../../migrations/${name}.sql`, import.meta.url), "utf8");
-    return { name, sql, checksum: digestToken(sql) };
+    const normalizedSql = sql.replace(/\r\n/g, "\n");
+    return {
+      name,
+      sql: normalizedSql,
+      checksum: digestToken(normalizedSql),
+      crlfChecksum: digestToken(normalizedSql.replace(/\n/g, "\r\n")),
+    };
   }));
 }
 
@@ -32,10 +38,17 @@ export async function migrateDatabase(client: PGlite): Promise<void> {
   const migrations = await expectedMigrations();
   await client.transaction(async (tx) => {
     await tx.exec("CREATE TABLE IF NOT EXISTS schema_migrations (name text PRIMARY KEY, checksum text NOT NULL, applied_at timestamptz NOT NULL DEFAULT now())");
-    for (const { name, sql, checksum } of migrations) {
+    for (const { name, sql, checksum, crlfChecksum } of migrations) {
       const applied = await tx.query<{ checksum: string }>("SELECT checksum FROM schema_migrations WHERE name=$1", [name]);
       if (applied.rows[0]) {
         if (applied.rows[0].checksum !== checksum) {
+          if (applied.rows[0].checksum === crlfChecksum) {
+            const normalized = await tx.query<{ name: string }>(
+              "UPDATE schema_migrations SET checksum=$1 WHERE name=$2 AND checksum=$3 RETURNING name",
+              [checksum, name, crlfChecksum],
+            );
+            if (normalized.rows.length === 1) continue;
+          }
           throw new Error(`Applied migration checksum mismatch for ${name}: stored=${applied.rows[0].checksum}, expected=${checksum}`);
         }
         continue;
